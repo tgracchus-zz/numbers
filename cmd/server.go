@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	numbersProtocol, terminate := numbers.NewNumbersProtocol(50)
+	numbersProtocol, terminate := numbers.NewNumbersProtocol(10)
 	cnnHandler := numbers.NewDefaultConnectionHandler(numbersProtocol)
 	concurrentHandler, err := numbers.NewConcurrentConnectionHandler(5, cnnHandler)
 	if err != nil {
