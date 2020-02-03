@@ -10,10 +10,38 @@ import (
 )
 
 type ConnectionHandler func(ctx context.Context, l net.Listener)
+
 type TCPProtocol func(ctx context.Context, c net.Conn) error
 
-func Start(ctx context.Context, l net.Listener, connectionHandler ConnectionHandler) {
+func Start(ctx context.Context, connectionHandler ConnectionHandler) {
+	l, err := net.Listen("tcp", "localhost:1234")
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer closeListener(l)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				cancel()
+				log.Println("closing listener")
+				closeListener(l)
+				return
+			}
+		}
+	}()
 	connectionHandler(ctx, l)
+}
+
+func closeListener(l net.Listener) {
+	if err := l.Close(); err != nil {
+		log.Println(err)
+	}
 }
 
 func NewConcurrentConnectionHandler(concurrencyLevel int, cnnHandler ConnectionHandler) (ConnectionHandler, error) {

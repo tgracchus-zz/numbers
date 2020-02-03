@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"tgracchus/numbers"
 )
 
@@ -14,13 +13,6 @@ func main() {
 	if err != nil {
 		log.Println(err)
 	}
-	l, err := net.Listen("tcp", "localhost:1234")
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	defer closeListener(l)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -29,18 +21,10 @@ func main() {
 			select {
 			case <-terminate:
 				cancel()
-				log.Println("closing listener")
-				_ = l.Close()
 				return
 			}
 		}
 	}()
 
-	numbers.Start(ctx, l, concurrentHandler)
-}
-
-func closeListener(l net.Listener) {
-	if err := l.Close(); err != nil {
-		log.Println(err)
-	}
+	numbers.Start(ctx, concurrentHandler)
 }
