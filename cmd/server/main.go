@@ -3,27 +3,36 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"tgracchus/numbers"
 )
 
 func main() {
-	numbersProtocol, numbersChn, terminate := numbers.NewNumbersProtocol(10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	numbersProtocol, numbersIn, terminateOut := numbers.NewNumbersProtocol(10)
+	deDuplicatedNumbers := numbers.NewNumberStore(ctx, 10, numbersIn, 10)
+
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = numbers.NewFileWriter(ctx, deDuplicatedNumbers, dir)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	cnnHandler := numbers.NewDefaultConnectionHandler(numbersProtocol, 5)
 	concurrentHandler, err := numbers.NewConcurrentConnectionHandler(5, cnnHandler)
 	if err != nil {
 		log.Println(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := numbers.NewNumberStore(10, numbersChn)
-	numbers.StartStore(ctx, store)
 
 	go func() {
 		for {
 			select {
-			case <-terminate:
+			case <-terminateOut:
 				cancel()
 				return
 			}

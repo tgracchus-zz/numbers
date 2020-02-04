@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -61,16 +62,14 @@ func NewNumbersProtocol(bufferSize int) (TCPProtocol, chan int, chan bool) {
 
 type NumberStore func(ctx context.Context)
 
-func StartStore(ctx context.Context, numberStore NumberStore) {
-	go numberStore(ctx)
-}
-
-func NewNumberStore(reportPeriod int, in chan int) NumberStore {
+func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBufferSize int) chan int {
+	out := make(chan int, outBufferSize)
 	numbers := make(map[int]bool)
 	currentUnique := 0
 	currentDuplicated := 0
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
-	return func(ctx context.Context) {
+	go func(ctx context.Context) {
+		defer close(out)
 		for {
 			select {
 			case <-ctx.Done():
@@ -82,17 +81,53 @@ func NewNumberStore(reportPeriod int, in chan int) NumberStore {
 					} else {
 						currentUnique++
 						numbers[number] = true
+						out <- number
 					}
 				} else {
 					break
 				}
 			case tick := <-ticker.C:
-				log.Print("Report of ", tick)
-				log.Printf("Received %d unique numbers, %d duplicates. Unique total: %d",
-					currentUnique, currentDuplicated, len(numbers))
+				log.Printf("Report %v Received %d unique numbers, %d duplicates. Unique total: %d",
+					tick, currentUnique, currentDuplicated, len(numbers))
 			}
 		}
-	}
+	}(ctx)
+	return out
 }
 
+type NumberWriter func(ctx context.Context)
 
+func NewFileWriter(ctx context.Context, in chan int, filepath string) error {
+	f, err := os.Create(filepath + "/numbers.log")
+	if err != nil {
+		return err
+	}
+
+	go func(ctx context.Context) {
+		defer closeFile(f)
+		for {
+			select {
+			case <-ctx.Done():
+				break
+			case number, more := <-in:
+
+				if more {
+					_, err := fmt.Fprintf(f, "%09d\n", number)
+					if err != nil {
+						log.Println(err)
+						return
+					}
+				} else {
+					break
+				}
+			}
+		}
+	}(ctx)
+	return nil
+}
+
+func closeFile(f *os.File) {
+	if err := f.Close(); err != nil {
+		log.Println(err)
+	}
+}
