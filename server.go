@@ -13,7 +13,7 @@ type ConnectionHandler func(ctx context.Context, l net.Listener)
 
 type TCPProtocol func(ctx context.Context, c net.Conn) error
 
-func Start(ctx context.Context, connectionHandler ConnectionHandler) {
+func StartServer(ctx context.Context, connectionHandler ConnectionHandler) {
 	l, err := net.Listen("tcp", "localhost:1234")
 	if err != nil {
 		log.Println(err)
