@@ -12,6 +12,43 @@ import (
 	"time"
 )
 
+const numberControllersBufferSize = 10000
+const numberWriterBufferSize = 10000
+const reportPeriod = 10
+const connectionReadTimeout = time.Duration(5) * time.Second
+const numberLogFileName = "numbers.log"
+
+func StartNumberServer(concurrentConnections int, address string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	numbersController, numbersOut, terminateOut := NewNumbersController(numberControllersBufferSize)
+	deDuplicatedNumbers := NewNumberStore(ctx, reportPeriod, numbersOut, numberWriterBufferSize)
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	NewFileWriter(ctx, deDuplicatedNumbers, dir+"/"+numberLogFileName)
+
+	cnnListener := NewSingleConnectionListener(numbersController, connectionReadTimeout)
+	multipleListener, err := NewMultipleConnectionListener(concurrentConnections, cnnListener)
+	if err != nil {
+		log.Println(err)
+	}
+
+	go func() {
+		for {
+			select {
+			case <-terminateOut:
+				cancel()
+				return
+			}
+		}
+	}()
+
+	StartConnectionListener(ctx, multipleListener, address)
+}
+
 func NewNumbersController(bufferSize int) (TCPController, chan int, chan bool) {
 	terminate := make(chan bool)
 	numbers := make(chan int, bufferSize)

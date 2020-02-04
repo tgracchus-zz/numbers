@@ -13,7 +13,7 @@ type ConnectionListener func(ctx context.Context, l net.Listener)
 
 type TCPController func(ctx context.Context, c net.Conn) error
 
-func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
+func StartConnectionListener(ctx context.Context, connectionListener ConnectionListener, address string) {
 	l, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Println(err)
@@ -65,7 +65,7 @@ func NewMultipleConnectionListener(concurrencyLevel int, cnnHandler ConnectionLi
 	}, nil
 }
 
-func NewSingleConnectionListener(protocol TCPController, readTimeOut int) ConnectionListener {
+func NewSingleConnectionListener(protocol TCPController, readTimeOut time.Duration) ConnectionListener {
 	return func(ctx context.Context, l net.Listener) {
 		for {
 			if checkIfTerminated(ctx) {
@@ -79,7 +79,7 @@ func NewSingleConnectionListener(protocol TCPController, readTimeOut int) Connec
 	}
 }
 
-func listenAndInvoke(ctx context.Context, l net.Listener, protocol TCPController, readTimeOut int) error {
+func listenAndInvoke(ctx context.Context, l net.Listener, protocol TCPController, readTimeOut time.Duration) error {
 	c, err := l.Accept()
 	if err != nil {
 		return err
@@ -87,7 +87,7 @@ func listenAndInvoke(ctx context.Context, l net.Listener, protocol TCPController
 	defer closeConnection(c)
 	log.Printf("connection: %s, accepted", c.RemoteAddr().String())
 
-	if err := c.SetReadDeadline(time.Now().Add(time.Duration(readTimeOut) * time.Second)); err != nil {
+	if err := c.SetReadDeadline(time.Now().Add(readTimeOut)); err != nil {
 		return fmt.Errorf("connection: %s, SetReadDeadline failed: %s", c.RemoteAddr().String(), err)
 	}
 	return protocol(ctx, c)

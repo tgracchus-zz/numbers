@@ -9,7 +9,10 @@ import (
 	"sync"
 	"testing"
 	"tgracchus/numbers"
+	"time"
 )
+
+const connectionReadTimeout = time.Duration(1) * time.Second
 
 func TestNewSingleConnectionListener(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -18,7 +21,8 @@ func TestNewSingleConnectionListener(t *testing.T) {
 	expectedNumber := "098765432"
 
 	sendData(t, client, expectedNumber)
-	cnnListener := numbers.NewSingleConnectionListener(NewMockTcpController(t, expectedNumber+"\n", nil), 5)
+	cnnListener := numbers.NewSingleConnectionListener(NewMockTcpController(t, expectedNumber+"\n", nil),
+		connectionReadTimeout)
 	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
 }
 
@@ -31,7 +35,7 @@ func TestNewSingleConnectionListenerContextCancelled(t *testing.T) {
 	sendData(t, client, expectedNumber)
 
 	controller := NewMockTcpController(t, "", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller, 5)
+	cnnListener := numbers.NewSingleConnectionListener(controller, connectionReadTimeout)
 	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
 }
 
@@ -44,7 +48,7 @@ func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testin
 	sendData(t, client, expectedNumber)
 
 	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller, 5)
+	cnnListener := numbers.NewSingleConnectionListener(controller, connectionReadTimeout)
 	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
 }
 
@@ -59,7 +63,7 @@ func TestNewMultipleConnectionListener(t *testing.T) {
 	sendData(t, client2, expectedNumber)
 
 	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller, 5)
+	cnnListener := numbers.NewSingleConnectionListener(controller, connectionReadTimeout)
 	multipleCnnListener, err := numbers.NewMultipleConnectionListener(2, cnnListener)
 	if err != nil {
 		t.Fatal(err)
@@ -107,4 +111,8 @@ func NewMockTcpController(t *testing.T, expectedData string, customError error) 
 		}
 		return nil
 	}
+}
+
+func BenchmarkServer(*testing.B) {
+
 }
