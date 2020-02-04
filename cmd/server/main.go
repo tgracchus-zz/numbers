@@ -11,20 +11,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	numbersProtocol, numbersIn, terminateOut := numbers.NewNumbersProtocol(10)
-	deDuplicatedNumbers := numbers.NewNumberStore(ctx, 10, numbersIn, 10)
-
+	numbersController, numbersOut, terminateOut := numbers.NewNumbersController(10)
+	deDuplicatedNumbers := numbers.NewNumberStore(ctx, 10, numbersOut, 10)
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = numbers.NewFileWriter(ctx, deDuplicatedNumbers, dir)
-	if err != nil {
-		log.Fatal(err)
-	}
+	numbers.NewFileWriter(ctx, deDuplicatedNumbers, dir+"/numbers.log")
 
-	cnnHandler := numbers.NewDefaultConnectionHandler(numbersProtocol, 5)
-	concurrentHandler, err := numbers.NewConcurrentConnectionHandler(5, cnnHandler)
+	cnnListener := numbers.NewSingleConnectionListener(numbersController, 5)
+	multipleListener, err := numbers.NewMultipleConnectionListener(5, cnnListener)
 	if err != nil {
 		log.Println(err)
 	}
@@ -39,5 +35,5 @@ func main() {
 		}
 	}()
 
-	numbers.StartServer(ctx, concurrentHandler)
+	numbers.StartServer(ctx, multipleListener, "localhost:1234")
 }

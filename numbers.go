@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func NewNumbersProtocol(bufferSize int) (TCPProtocol, chan int, chan bool) {
+func NewNumbersController(bufferSize int) (TCPController, chan int, chan bool) {
 	terminate := make(chan bool)
 	numbers := make(chan int, bufferSize)
 	return func(ctx context.Context, c net.Conn) error {
@@ -51,7 +51,7 @@ func NewNumbersProtocol(bufferSize int) (TCPProtocol, chan int, chan bool) {
 		log.Printf("connection: %s, number: %d", c.RemoteAddr().String(), number)
 
 		if checkIfTerminated(ctx) {
-			return fmt.Errorf("client: %s, terminated")
+			return fmt.Errorf("client: %s, terminated", c.RemoteAddr().String())
 		}
 
 		numbers <- number
@@ -59,8 +59,6 @@ func NewNumbersProtocol(bufferSize int) (TCPProtocol, chan int, chan bool) {
 		return nil
 	}, numbers, terminate
 }
-
-type NumberStore func(ctx context.Context)
 
 func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBufferSize int) chan int {
 	out := make(chan int, outBufferSize)
@@ -73,7 +71,7 @@ func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBuffe
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case number, more := <-in:
 				if more {
 					if _, ok := numbers[number]; ok {
@@ -84,7 +82,7 @@ func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBuffe
 						out <- number
 					}
 				} else {
-					break
+					return
 				}
 			case tick := <-ticker.C:
 				log.Printf("Report %v Received %d unique numbers, %d duplicates. Unique total: %d",
@@ -95,22 +93,18 @@ func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBuffe
 	return out
 }
 
-type NumberWriter func(ctx context.Context)
-
-func NewFileWriter(ctx context.Context, in chan int, filepath string) error {
-	f, err := os.Create(filepath + "/numbers.log")
+func NewFileWriter(ctx context.Context, in chan int, filePath string) {
+	f, err := os.Create(filePath)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
-
 	go func(ctx context.Context) {
 		defer closeFile(f)
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case number, more := <-in:
-
 				if more {
 					_, err := fmt.Fprintf(f, "%09d\n", number)
 					if err != nil {
@@ -118,12 +112,11 @@ func NewFileWriter(ctx context.Context, in chan int, filepath string) error {
 						return
 					}
 				} else {
-					break
+					return
 				}
 			}
 		}
 	}(ctx)
-	return nil
 }
 
 func closeFile(f *os.File) {
