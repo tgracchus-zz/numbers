@@ -122,7 +122,7 @@ func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int) chan 
 	var currentUnique int64 = 0
 	var currentDuplicated int64 = 0
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
-	func(ctx context.Context) {
+	go func(ctx context.Context) {
 		defer ticker.Stop()
 		defer close(out)
 		for {
