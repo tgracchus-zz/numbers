@@ -116,8 +116,8 @@ func NewNumbersController(bufferSize int, terminate chan int) (TCPController, ch
 }
 
 func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int, outBufferSize int) chan int {
-	in := make(chan int, len(ins)*outBufferSize)
-	out := fanIn(ctx, ins, outBufferSize)
+	out := make(chan int, len(ins)*outBufferSize)
+	in := fanIn(ctx, ins, outBufferSize)
 
 	numbers := make(map[int]bool)
 	var total int64 = 0
@@ -126,7 +126,7 @@ func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int, outBu
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
 
 	store := func(ctx context.Context) {
-		defer close(in)
+		defer close(out)
 		for {
 			select {
 			case <-ctx.Done():
