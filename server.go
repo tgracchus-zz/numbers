@@ -3,24 +3,24 @@ package numbers
 import (
 	"context"
 	"fmt"
+	"github.com/pkg/errors"
 	"log"
 	"net"
-	"sync"
-	"time"
 )
 
 type ConnectionListener func(ctx context.Context, l net.Listener)
 
 type TCPController func(ctx context.Context, c net.Conn) error
 
-func StartConnectionListener(ctx context.Context, connectionListener ConnectionListener, address string) {
-	l, err := net.Listen("tcp", address)
+func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
+	conf := &net.ListenConfig{KeepAlive: 1000}
+	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Println(err)
+		log.Printf("%+v", errors.Wrap(err, "StartConnectionListener"))
 		return
 	}
 	defer closeListener(l)
-
+	log.Printf("server started at:%s", address)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -30,7 +30,7 @@ func StartConnectionListener(ctx context.Context, connectionListener ConnectionL
 			select {
 			case <-ctx.Done():
 				cancel()
-				log.Println("closing listener")
+				log.Printf("%+v", "closing listener")
 				closeListener(l)
 				return
 			}
@@ -42,7 +42,7 @@ func StartConnectionListener(ctx context.Context, connectionListener ConnectionL
 
 func closeListener(l net.Listener) {
 	if err := l.Close(); err != nil {
-		log.Println(err)
+		log.Printf("%v", errors.Wrap(err, "Closing listener"))
 	}
 }
 
@@ -51,51 +51,43 @@ func NewMultipleConnectionListener(concurrencyLevel int, cnnHandler ConnectionLi
 		return nil, fmt.Errorf("concurrency level should be more than 0, not %d", concurrencyLevel)
 	}
 	return func(ctx context.Context, l net.Listener) {
-		var wg sync.WaitGroup
-		wg.Add(concurrencyLevel)
 		for i := 0; i < concurrencyLevel; i++ {
-			go func(connection int) {
+			listener := func(connection int) {
 				log.Printf("creating connection handler: %d", connection)
 				cnnHandler(ctx, l)
 				log.Printf("closing connection handler: %d", connection)
-				wg.Done()
-			}(i)
+			}
+			go listener(i)
 		}
-		wg.Wait()
+		<-ctx.Done()
 	}, nil
 }
 
-func NewSingleConnectionListener(protocol TCPController, readTimeOut time.Duration) ConnectionListener {
+func NewSingleConnectionListener(controller TCPController) ConnectionListener {
 	return func(ctx context.Context, l net.Listener) {
 		for {
 			if checkIfTerminated(ctx) {
 				return
 			}
-			if err := listenAndInvoke(ctx, l, protocol, readTimeOut); err != nil {
-				log.Print(err)
+			c, err := l.Accept()
+			if err != nil {
+				log.Printf("%+v", errors.Wrap(err, "accept connection"))
+			}
+			if checkIfTerminated(ctx) {
 				return
+			}
+
+			err = controller(ctx, c)
+			if err != nil {
+				log.Printf("%+v", errors.Wrap(err, "controller error"))
 			}
 		}
 	}
 }
 
-func listenAndInvoke(ctx context.Context, l net.Listener, protocol TCPController, readTimeOut time.Duration) error {
-	c, err := l.Accept()
-	if err != nil {
-		return err
-	}
-	defer closeConnection(c)
-	log.Printf("connection: %s, accepted", c.RemoteAddr().String())
-
-	if err := c.SetReadDeadline(time.Now().Add(readTimeOut)); err != nil {
-		return fmt.Errorf("connection: %s, SetReadDeadline failed: %s", c.RemoteAddr().String(), err)
-	}
-	return protocol(ctx, c)
-}
-
 func closeConnection(c net.Conn) {
 	if err := c.Close(); err != nil {
-		log.Println(err)
+		log.Printf("%+v", errors.Wrap(err, "closeConnection"))
 	}
 }
 

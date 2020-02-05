@@ -21,8 +21,7 @@ func TestNewSingleConnectionListener(t *testing.T) {
 	expectedNumber := "098765432"
 
 	sendData(t, client, expectedNumber)
-	cnnListener := numbers.NewSingleConnectionListener(NewMockTcpController(t, expectedNumber+"\n", nil),
-		connectionReadTimeout)
+	cnnListener := numbers.NewSingleConnectionListener(NewMockTcpController(t, expectedNumber+"\n", nil))
 	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
 }
 
@@ -35,7 +34,7 @@ func TestNewSingleConnectionListenerContextCancelled(t *testing.T) {
 	sendData(t, client, expectedNumber)
 
 	controller := NewMockTcpController(t, "", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller, connectionReadTimeout)
+	cnnListener := numbers.NewSingleConnectionListener(controller)
 	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
 }
 
@@ -48,7 +47,7 @@ func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testin
 	sendData(t, client, expectedNumber)
 
 	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller, connectionReadTimeout)
+	cnnListener := numbers.NewSingleConnectionListener(controller)
 	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
 }
 
@@ -63,7 +62,7 @@ func TestNewMultipleConnectionListener(t *testing.T) {
 	sendData(t, client2, expectedNumber)
 
 	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller, connectionReadTimeout)
+	cnnListener := numbers.NewSingleConnectionListener(controller)
 	multipleCnnListener, err := numbers.NewMultipleConnectionListener(2, cnnListener)
 	if err != nil {
 		t.Fatal(err)
@@ -111,8 +110,4 @@ func NewMockTcpController(t *testing.T, expectedData string, customError error) 
 		}
 		return nil
 	}
-}
-
-func BenchmarkServer(*testing.B) {
-
 }

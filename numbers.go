@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/pkg/errors"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -13,27 +15,26 @@ import (
 )
 
 const numberControllersBufferSize = 10000
-const numberWriterBufferSize = 10000
+const numberWriterBufferSize = 100000
 const reportPeriod = 10
-const connectionReadTimeout = time.Duration(5) * time.Second
 const numberLogFileName = "numbers.log"
 
-func StartNumberServer(concurrentConnections int, address string) {
-	ctx, cancel := context.WithCancel(context.Background())
+func StartNumberServer(ctx context.Context, concurrentConnections int, address string) {
+	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	numbersController, numbersOut, terminateOut := NewNumbersController(numberControllersBufferSize)
-	deDuplicatedNumbers := NewNumberStore(ctx, reportPeriod, numbersOut, numberWriterBufferSize)
+	deDuplicatedNumbers := NewNumberStore(cctx, reportPeriod, numbersOut, numberWriterBufferSize)
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
-	NewFileWriter(ctx, deDuplicatedNumbers, dir+"/"+numberLogFileName)
+	NewFileWriter(cctx, deDuplicatedNumbers, dir+"/"+numberLogFileName)
 
-	cnnListener := NewSingleConnectionListener(numbersController, connectionReadTimeout)
+	cnnListener := NewSingleConnectionListener(numbersController)
 	multipleListener, err := NewMultipleConnectionListener(concurrentConnections, cnnListener)
 	if err != nil {
-		log.Println(err)
+		log.Printf("%+v", err)
 	}
 
 	go func() {
@@ -46,64 +47,74 @@ func StartNumberServer(concurrentConnections int, address string) {
 		}
 	}()
 
-	StartConnectionListener(ctx, multipleListener, address)
+	StartServer(cctx, multipleListener, address)
 }
 
 func NewNumbersController(bufferSize int) (TCPController, chan int, chan bool) {
 	terminate := make(chan bool)
 	numbers := make(chan int, bufferSize)
+	//duration := time.Duration(5) * time.Second
 	return func(ctx context.Context, c net.Conn) error {
-		if checkIfTerminated(ctx) {
-			return fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String())
-		}
-
+		defer closeConnection(c)
 		reader := bufio.NewReader(c)
-		data, err := reader.ReadString('\n')
+		/*err := c.SetReadDeadline(time.Now().Add(duration))
 		if err != nil {
-			return err
+			return errors.Wrap(err, "SetReadDeadline")
+		}*/
+		for {
+			if checkIfTerminated(ctx) {
+				return errors.Wrapf(ctx.Err(), "client: %s, terminated", c.RemoteAddr().String())
+			}
+			data, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					return nil
+				}
+				return errors.Wrap(err, "ReadString")
+			}
+
+			data = strings.TrimSuffix(data, "\n")
+
+			if len(data) != 9 {
+				log.Printf("%v", errors.Wrap(fmt.Errorf("client: %s, no 9 char length string %s", c.RemoteAddr().String(), data), "check for 9 digits"))
+				return nil
+			}
+
+			if checkIfTerminated(ctx) {
+				return errors.Wrapf(ctx.Err(), "connection: %s, terminated", c.RemoteAddr().String())
+			}
+
+			if data == "terminate" {
+				terminate <- true
+				close(terminate)
+				close(numbers)
+				return errors.Wrap(fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String()), "terminated")
+			}
+
+			number, err := strconv.Atoi(data)
+			if err != nil {
+				log.Printf("%v", errors.Wrap(err, "strconv.Atoi"))
+				return nil
+			}
+
+			if checkIfTerminated(ctx) {
+				return errors.Wrapf(ctx.Err(), "client: %s, terminated", c.RemoteAddr().String())
+			}
+
+			numbers <- number
 		}
 
-		if checkIfTerminated(ctx) {
-			return fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String())
-		}
-
-		data = strings.TrimSuffix(data, "\n")
-		if data == "terminate" {
-			terminate <- true
-			close(terminate)
-			close(numbers)
-			return fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String())
-		}
-
-		if len(data) != 9 {
-			return fmt.Errorf("client: %s, no 9 char length string %s", c.RemoteAddr().String(), data)
-		}
-
-		number, err := strconv.Atoi(data)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-
-		log.Printf("connection: %s, number: %d", c.RemoteAddr().String(), number)
-
-		if checkIfTerminated(ctx) {
-			return fmt.Errorf("client: %s, terminated", c.RemoteAddr().String())
-		}
-
-		numbers <- number
-
-		return nil
 	}, numbers, terminate
 }
 
 func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBufferSize int) chan int {
 	out := make(chan int, outBufferSize)
 	numbers := make(map[int]bool)
-	currentUnique := 0
-	currentDuplicated := 0
+	var total int64 = 0
+	var currentUnique int64 = 0
+	var currentDuplicated int64 = 0
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
-	go func(ctx context.Context) {
+	store := func(ctx context.Context) {
 		defer close(out)
 		for {
 			select {
@@ -111,6 +122,7 @@ func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBuffe
 				return
 			case number, more := <-in:
 				if more {
+					total++
 					if _, ok := numbers[number]; ok {
 						currentDuplicated++
 					} else {
@@ -122,11 +134,14 @@ func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBuffe
 					return
 				}
 			case tick := <-ticker.C:
-				log.Printf("Report %v Received %d unique numbers, %d duplicates. Unique total: %d",
-					tick, currentUnique, currentDuplicated, len(numbers))
+				log.Printf("Report %v Received %d unique numbers, %d duplicates. Unique total: %d. Total: %d",
+					tick, currentUnique, currentDuplicated, len(numbers), total)
+				currentUnique = 0
+				currentDuplicated = 0
 			}
 		}
-	}(ctx)
+	}
+	go store(ctx)
 	return out
 }
 
@@ -135,7 +150,8 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	go func(ctx context.Context) {
+	b := bufio.NewWriter(f)
+	writer := func(ctx context.Context) {
 		defer closeFile(f)
 		for {
 			select {
@@ -143,21 +159,22 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 				return
 			case number, more := <-in:
 				if more {
-					_, err := fmt.Fprintf(f, "%09d\n", number)
+					_, err := fmt.Fprintf(b, "%09d\n", number)
 					if err != nil {
-						log.Println(err)
-						return
+						log.Printf("%+v", errors.Wrap(err, "Fprintf"))
 					}
 				} else {
 					return
 				}
 			}
 		}
-	}(ctx)
+	}
+
+	go writer(ctx)
 }
 
 func closeFile(f *os.File) {
 	if err := f.Close(); err != nil {
-		log.Println(err)
+		log.Printf("%+v", err)
 	}
 }
