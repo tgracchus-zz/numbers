@@ -17,7 +17,7 @@ func testServer(clientsNumber int, reqs int, port string) {
 	//go numbers.StartNumberServer(ctx, concurrentConnections, "localhost:"+port)
 	clients(&wg, clientsNumber, reqs, port)
 	wg.Wait()
-	sendTerminate(port)
+	//sendTerminate(port)
 	//cancel()
 }
 func TestServerBaseline(t *testing.T) {

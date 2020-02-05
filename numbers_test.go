@@ -19,7 +19,7 @@ func TestNumbersControllerReadNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, numbersIn := numbers.NewNumbersController(10, terminated)
+	numbersProtocol, numbersIn := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -44,7 +44,7 @@ func TestNumbersControllerNotNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(10, terminated)
+	numbersProtocol, _ := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -64,7 +64,7 @@ func TestNumbersControllerClosedConnection(t *testing.T) {
 	server, _ := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(10, terminated)
+	numbersProtocol, _ := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -83,7 +83,7 @@ func TestNumbersControllerContextCancelled(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(10, terminated)
+	numbersProtocol, _ := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -100,7 +100,7 @@ func TestNumbersControllerTerminate(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(10, terminated)
+	numbersProtocol, _ := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -145,7 +145,7 @@ func TestNewNumberStoreNumber(t *testing.T) {
 
 	expectedNumber := 123456789
 	numbersIn <- expectedNumber
-	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn}, 2)
+	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn})
 
 	expectNumber(numberOut, expectedNumber, t)
 }
@@ -161,7 +161,7 @@ func TestNewNumberStoreTwoNumbers(t *testing.T) {
 	numbersIn <- expectedNumber1
 	numbersIn <- expectedNumber2
 
-	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn}, 2)
+	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn})
 
 	expectNumber(numberOut, expectedNumber1, t)
 	expectNumber(numberOut, expectedNumber2, t)
@@ -178,7 +178,7 @@ func TestNewNumberStoreDeduplicated(t *testing.T) {
 	numbersIn <- expectedNumber
 	numbersIn <- expectedNumber
 
-	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn}, 2)
+	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn})
 
 	expectNumber(numberOut, expectedNumber, t)
 	numberNotExpected(numberOut, t)
@@ -191,7 +191,7 @@ func TestNewNumberStoreCloseInChannel(t *testing.T) {
 	numbersIn := make(chan int, 2)
 	close(numbersIn)
 
-	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn}, 2)
+	numberOut := numbers.NewNumberStore(ctx, 10, []chan int{numbersIn})
 	numberNotExpected(numberOut, t)
 }
 

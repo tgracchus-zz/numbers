@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-const numberControllersBufferSize = 100000
-const numberWriterBufferSize = 1000000
 const reportPeriod = 10
 const numberLogFileName = "numbers.log"
 
@@ -32,14 +30,14 @@ func StartNumberServer(ctx context.Context, concurrentConnections int, address s
 	listeners := make([]ConnectionListener, concurrentConnections)
 	numbersOuts := make([]chan int, concurrentConnections)
 	for i := 0; i < concurrentConnections; i++ {
-		numbersController, numbersOut := NewNumbersController(numberControllersBufferSize, terminate)
+		numbersController, numbersOut := NewNumbersController(terminate)
 		cnnListener := NewSingleConnectionListener(numbersController)
 		controllers[i] = numbersController
 		listeners[i] = cnnListener
 		numbersOuts[i] = numbersOut
 	}
 
-	deDuplicatedNumbers := NewNumberStore(cctx, reportPeriod, numbersOuts, numberWriterBufferSize)
+	deDuplicatedNumbers := NewNumberStore(cctx, reportPeriod, numbersOuts)
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -70,8 +68,8 @@ func cancelContextWhenTerminateSignal(ctx context.Context, cancel context.Cancel
 	return terminate
 }
 
-func NewNumbersController(bufferSize int, terminate chan int) (TCPController, chan int) {
-	numbers := make(chan int, bufferSize)
+func NewNumbersController(terminate chan int) (TCPController, chan int) {
+	numbers := make(chan int)
 	duration := time.Duration(60) * time.Second
 	return func(ctx context.Context, c net.Conn) error {
 		defer closeConnection(c)
@@ -115,9 +113,9 @@ func NewNumbersController(bufferSize int, terminate chan int) (TCPController, ch
 	}, numbers
 }
 
-func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int, outBufferSize int) chan int {
-	out := make(chan int, len(ins)*outBufferSize)
-	in := fanIn(ctx, ins, outBufferSize)
+func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int) chan int {
+	out := make(chan int)
+	in := fanIn(ctx, ins)
 
 	numbers := make(map[int]bool)
 	var total int64 = 0
@@ -156,10 +154,10 @@ func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int, outBu
 	return out
 }
 
-func fanIn(ctx context.Context, ins []chan int, outBufferSize int) chan int {
+func fanIn(ctx context.Context, ins []chan int) chan int {
 	var wg sync.WaitGroup
 	wg.Add(len(ins))
-	out := make(chan int, outBufferSize)
+	out := make(chan int)
 	go func() {
 		for _, ch := range ins {
 			go func(in chan int) {
@@ -190,12 +188,12 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 		log.Fatal(err)
 	}
 	b := bufio.NewWriter(f)
+	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
 	writer := func(ctx context.Context) {
-		defer closeFile(b,f)
+		defer closeFile(b, f)
 		for {
 			select {
 			case <-ctx.Done():
-
 				if err != nil {
 					log.Printf("%v", errors.Wrap(err, "Fprintf"))
 				}
@@ -209,7 +207,12 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 				} else {
 					return
 				}
+			case <-ticker.C:
+				if err := b.Flush(); err != nil {
+					log.Printf("%v", err)
+				}
 			}
+
 		}
 	}
 
