@@ -3,7 +3,6 @@ package numbers_test
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -12,8 +11,6 @@ import (
 	"time"
 )
 
-const connectionReadTimeout = time.Duration(1) * time.Second
-
 func TestNewSingleConnectionListener(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -21,8 +18,8 @@ func TestNewSingleConnectionListener(t *testing.T) {
 	expectedNumber := "098765432"
 
 	sendData(t, client, expectedNumber)
-	cnnListener := numbers.NewSingleConnectionListener(NewMockTcpController(t, expectedNumber+"\n", nil))
-	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
+	cnnListener := numbers.NewSingleConnectionListener(newMockTcpController(t, cancel, expectedNumber+"\n"))
+	cnnListener(ctx, &mockListener{connection: server})
 }
 
 func TestNewSingleConnectionListenerContextCancelled(t *testing.T) {
@@ -33,9 +30,9 @@ func TestNewSingleConnectionListenerContextCancelled(t *testing.T) {
 	expectedNumber := "098765432"
 	sendData(t, client, expectedNumber)
 
-	controller := NewMockTcpController(t, "", nil)
+	controller := newMockTcpController(t, cancel, "")
 	cnnListener := numbers.NewSingleConnectionListener(controller)
-	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
+	cnnListener(ctx, &mockListener{connection: server})
 }
 
 func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testing.T) {
@@ -46,45 +43,49 @@ func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testin
 	expectedNumber := "098765432"
 	sendData(t, client, expectedNumber)
 
-	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
+	controller := newMockTcpController(t, cancel, expectedNumber+"\n")
 	cnnListener := numbers.NewSingleConnectionListener(controller)
-	cnnListener(ctx, &mockListener{connection: []net.Conn{server}})
+	cnnListener(ctx, &mockListener{connection: server})
 }
 
 func TestNewMultipleConnectionListener(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	expectedNumber := "098765432"
-	server, client := net.Pipe()
-	sendData(t, client, expectedNumber)
-	server2, client2 := net.Pipe()
-	sendData(t, client2, expectedNumber)
-
-	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
-	cnnListener := numbers.NewSingleConnectionListener(controller)
-	multipleCnnListener, err := numbers.NewMultipleConnectionListener([]numbers.ConnectionListener{cnnListener})
+	mockConnectionListener := newMockConnectionListener(t, ctx, cancel)
+	multipleCnnListener, err := numbers.NewMultipleConnectionListener([]numbers.ConnectionListener{mockConnectionListener})
 	if err != nil {
 		t.Fatal(err)
 	}
-	multipleCnnListener(ctx, &mockListener{connection: []net.Conn{server, server2}, i: 0})
+
+	server, _ := net.Pipe()
+	multipleCnnListener(ctx, &mockListener{connection: server, i: 0})
+}
+
+func newMockConnectionListener(t *testing.T, ctx context.Context, cancel context.CancelFunc) numbers.ConnectionListener {
+	ticker := time.NewTicker(time.Second)
+	mock := func(ctx context.Context, l net.Listener) {
+		cancel()
+	}
+	go func() {
+		select {
+		case <-ticker.C:
+			cancel()
+			t.Fatal("expected to be closed")
+		case <-ctx.Done():
+		}
+	}()
+	return mock
 }
 
 type mockListener struct {
-	connection []net.Conn
+	connection net.Conn
 	i          int
 	mux        sync.Mutex
 }
 
 func (m *mockListener) Accept() (net.Conn, error) {
-	if m.i < len(m.connection) {
-		return nil, errors.New("stop")
-	}
-	conn := m.connection[m.i]
-	m.mux.Lock()
-	defer m.mux.Unlock()
-	m.i = m.i + 1
-	return conn, nil
+	return m.connection, nil
 }
 
 func (m *mockListener) Close() error {
@@ -94,7 +95,7 @@ func (m *mockListener) Close() error {
 func (m *mockListener) Addr() net.Addr {
 	return nil
 }
-func NewMockTcpController(t *testing.T, expectedData string, customError error) numbers.TCPController {
+func newMockTcpController(t *testing.T, cancel context.CancelFunc, expectedData string) numbers.TCPController {
 	return func(ctx context.Context, c net.Conn) error {
 		reader := bufio.NewReader(c)
 		data, err := reader.ReadString('\n')
@@ -102,12 +103,10 @@ func NewMockTcpController(t *testing.T, expectedData string, customError error) 
 			t.Fatal(err)
 		}
 
-		if customError != nil {
-			return customError
-		}
 		if data != expectedData {
 			t.Fatal(fmt.Errorf("expected %s but got %s", expectedData, data))
 		}
+		cancel()
 		return nil
 	}
 }

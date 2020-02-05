@@ -72,9 +72,11 @@ func NewNumbersController(terminate chan int) (TCPController, chan int) {
 	numbers := make(chan int)
 	duration := time.Duration(60) * time.Second
 	return func(ctx context.Context, c net.Conn) error {
-		defer closeConnection(c)
 		reader := bufio.NewReader(c)
 		for {
+			if checkIfTerminated(ctx) {
+				return nil
+			}
 			data, err := reader.ReadString('\n')
 			if err != nil {
 				if err == io.EOF {
@@ -122,8 +124,8 @@ func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int) chan 
 	var currentUnique int64 = 0
 	var currentDuplicated int64 = 0
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
-
 	store := func(ctx context.Context) {
+		defer ticker.Stop()
 		defer close(out)
 		for {
 			select {
@@ -189,14 +191,12 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 	}
 	b := bufio.NewWriter(f)
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
-	writer := func(ctx context.Context) {
+	go func(ctx context.Context) {
+		defer ticker.Stop()
 		defer closeFile(b, f)
 		for {
 			select {
 			case <-ctx.Done():
-				if err != nil {
-					log.Printf("%v", errors.Wrap(err, "Fprintf"))
-				}
 				return
 			case number, more := <-in:
 				if more {
@@ -214,9 +214,7 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 			}
 
 		}
-	}
-
-	go writer(ctx)
+	}(ctx)
 }
 
 func closeFile(b *bufio.Writer, f *os.File) {

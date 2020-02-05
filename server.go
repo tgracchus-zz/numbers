@@ -11,8 +11,6 @@ type ConnectionListener func(ctx context.Context, l net.Listener)
 
 type TCPController func(ctx context.Context, c net.Conn) error
 
-type TCPControllerFactory func(bufferSize int) (TCPController, chan int, chan bool)
-
 func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
@@ -60,31 +58,39 @@ func NewMultipleConnectionListener(cnnHandlers [] ConnectionListener) (Connectio
 func NewSingleConnectionListener(controller TCPController) ConnectionListener {
 	return func(ctx context.Context, l net.Listener) {
 		for {
-			if checkIfTerminated(ctx) {
+			if listenOnce(ctx, l, controller) {
 				return
-			}
-			c, err := l.Accept()
-			if err != nil {
-				if err.Error() == "use of closed network connection" {
-					return
-				}
-
-				log.Printf("%v", errors.Wrap(err, "accept connection"))
-			}
-			if checkIfTerminated(ctx) {
-				return
-			}
-			err = controller(ctx, c)
-			if err != nil {
-				log.Printf("%v", errors.Wrap(err, "controller error"))
 			}
 		}
 	}
 }
 
+func listenOnce(ctx context.Context, l net.Listener, controller TCPController) bool {
+	if checkIfTerminated(ctx) {
+		return true
+	}
+	c, err := l.Accept()
+	if err != nil {
+		log.Printf("%v", errors.Wrap(err, "accept connection"))
+		return true
+	}
+	defer closeConnection(c)
+
+	if checkIfTerminated(ctx) {
+		return true
+	}
+	err = controller(ctx, c)
+	if err != nil {
+		log.Printf("%v", errors.Wrap(err, "controller error"))
+	}
+	return false
+}
+
 func closeConnection(c net.Conn) {
-	if err := c.Close(); err != nil {
-		log.Printf("%v", errors.Wrap(err, "closeConnection"))
+	if c != nil {
+		if err := c.Close(); err != nil {
+			log.Printf("%v", errors.Wrap(err, "closeConnection"))
+		}
 	}
 }
 

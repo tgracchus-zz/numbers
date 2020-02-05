@@ -28,12 +28,9 @@ func TestNumbersControllerReadNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	sendData(t, client, wireNumber)
-	err = numbersProtocol(ctx, server)
-	if err != nil {
-		t.Fatal(err)
-	}
+	go numbersProtocol(ctx, server)
+
 	number := <-numbersIn
 	if expectedNumber != number {
 		t.Fatal(fmt.Errorf("number should be: %d not %d", expectedNumber, number))
@@ -44,19 +41,19 @@ func TestNumbersControllerNotNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(terminated)
+	numbersProtocol, numbersIn := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	wireText := "IAMTEXT!!"
 	sendData(t, client, wireText)
-	err := numbersProtocol(ctx, server)
-	if err == nil {
-		t.Fatal("An *strconv.NumError was expected when parsing a text")
-	}
-	_, ok := err.(*strconv.NumError)
-	if !ok {
-		t.Fatal("An *strconv.NumError was expected when parsing a text")
+	go numbersProtocol(ctx, server)
+
+	ticker := time.NewTicker(time.Second)
+	select {
+	case number := <-numbersIn:
+		t.Fatal(fmt.Errorf("non expected number:%d", number))
+	case <-ticker.C:
 	}
 }
 
@@ -83,17 +80,22 @@ func TestNumbersControllerContextCancelled(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(terminated)
+	numbersProtocol, numbersIn := numbers.NewNumbersController(terminated)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	wireNumber := "098765432"
 
 	sendData(t, client, wireNumber)
-	err := numbersProtocol(ctx, server)
-	if err == nil {
-		t.Fatal("connection: pipe, terminated is expected")
+	go numbersProtocol(ctx, server)
+
+	ticker := time.NewTicker(time.Second)
+	select {
+	case number := <-numbersIn:
+		t.Fatal(fmt.Errorf("non expected number:%d", number))
+	case <-ticker.C:
 	}
+
 }
 
 func TestNumbersControllerTerminate(t *testing.T) {
@@ -106,23 +108,24 @@ func TestNumbersControllerTerminate(t *testing.T) {
 
 	sendData(t, client, "terminate")
 
-	termkilled := 1
+	termkilled := 0
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		select {
 		case termkilled = <-terminated:
 			wg.Done()
-		case <-time.After(1 * time.Second):
+		case <-time.After(time.Second):
 			wg.Done()
 		}
 	}()
+
 	err := numbersProtocol(ctx, server)
 	if err == nil {
 		t.Fatal("connection: pipe, terminated is expected")
 	}
 	wg.Wait()
-	if termkilled == 1 {
+	if termkilled != 1 {
 		t.Fatal("a termkill signal is expected in the terminated channel")
 	}
 }
@@ -217,7 +220,6 @@ func expectNumber(numberOut chan int, expectedNumber int, t *testing.T) {
 
 func TestNewFileWriter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	numbersIn := make(chan int, 2)
 	defer close(numbersIn)
@@ -232,8 +234,7 @@ func TestNewFileWriter(t *testing.T) {
 	filePath := testFilePath(dir)
 	defer cleanUpFile(filePath)
 	numbers.NewFileWriter(ctx, numbersIn, filePath)
-
-	expectedFileContent(t, err, filePath, expectedNumber)
+	expectedFileContent(t, cancel, err, filePath, expectedNumber)
 }
 
 func TestNewFileWriterContextCancelled(t *testing.T) {
@@ -274,13 +275,12 @@ func TestNewFileWriterChannelClosed(t *testing.T) {
 
 func TestNewFileWriterOverwriteWhenStarted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	cancel()
 
 	numbersIn := make(chan int, 2)
 	defer close(numbersIn)
 
 	nonExpectedNumber := 123456789
-
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -297,7 +297,7 @@ func TestNewFileWriterOverwriteWhenStarted(t *testing.T) {
 		return
 	}
 
-	expectedFileContent(t, err, filePath, nonExpectedNumber)
+	expectedFileContent(t, cancel, err, filePath, nonExpectedNumber)
 
 	numbers.NewFileWriter(ctx, numbersIn, filePath)
 	fileEmpty(t, err, filePath)
@@ -328,8 +328,9 @@ func cleanUpFile(filePath string) {
 	}
 }
 
-func expectedFileContent(t *testing.T, err error, filePath string, expectedNumber int) {
+func expectedFileContent(t *testing.T, cancel context.CancelFunc, err error, filePath string, expectedNumber int) {
 	time.Sleep(time.Second * 1)
+	cancel()
 	resultFile, err := os.Open(filePath)
 	if err != nil {
 		t.Fatal(err)
