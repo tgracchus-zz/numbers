@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-const numberControllersBufferSize = 1000000
-const numberWriterBufferSize = 10000000
+const numberControllersBufferSize = 100000
+const numberWriterBufferSize = 1000000
 const reportPeriod = 10
 const numberLogFileName = "numbers.log"
 
@@ -48,7 +48,7 @@ func StartNumberServer(ctx context.Context, concurrentConnections int, address s
 
 	multipleListener, err := NewMultipleConnectionListener(listeners)
 	if err != nil {
-		log.Printf("%+v", err)
+		log.Printf("%v", err)
 	}
 
 	StartServer(cctx, multipleListener, address)
@@ -191,16 +191,20 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 	}
 	b := bufio.NewWriter(f)
 	writer := func(ctx context.Context) {
-		defer closeFile(f)
+		defer closeFile(b,f)
 		for {
 			select {
 			case <-ctx.Done():
+
+				if err != nil {
+					log.Printf("%v", errors.Wrap(err, "Fprintf"))
+				}
 				return
 			case number, more := <-in:
 				if more {
 					_, err := fmt.Fprintf(b, "%09d\n", number)
 					if err != nil {
-						log.Printf("%+v", errors.Wrap(err, "Fprintf"))
+						log.Printf("%v", errors.Wrap(err, "Fprintf"))
 					}
 				} else {
 					return
@@ -212,8 +216,11 @@ func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 	go writer(ctx)
 }
 
-func closeFile(f *os.File) {
+func closeFile(b *bufio.Writer, f *os.File) {
+	if err := b.Flush(); err != nil {
+		log.Printf("%v", err)
+	}
 	if err := f.Close(); err != nil {
-		log.Printf("%+v", err)
+		log.Printf("%v", err)
 	}
 }

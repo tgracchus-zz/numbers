@@ -17,7 +17,7 @@ func StartServer(ctx context.Context, connectionListener ConnectionListener, add
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Printf("%+v", errors.Wrap(err, "StartConnectionListener"))
+		log.Printf("%v", errors.Wrap(err, "StartConnectionListener"))
 		return
 	}
 	defer closeListener(l)
@@ -31,7 +31,7 @@ func StartServer(ctx context.Context, connectionListener ConnectionListener, add
 			select {
 			case <-ctx.Done():
 				cancel()
-				log.Printf("%+v", "closing listener")
+				log.Printf("%v", "closing listener")
 				closeListener(l)
 				return
 			}
@@ -84,7 +84,7 @@ func NewSingleConnectionListener(controller TCPController) ConnectionListener {
 
 func closeConnection(c net.Conn) {
 	if err := c.Close(); err != nil {
-		log.Printf("%+v", errors.Wrap(err, "closeConnection"))
+		log.Printf("%v", errors.Wrap(err, "closeConnection"))
 	}
 }
 
