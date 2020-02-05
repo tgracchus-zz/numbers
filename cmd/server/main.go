@@ -14,7 +14,7 @@ import (
 func main() {
 	pflag.Bool("profile", false, "profile the server")
 	pflag.Int("concurrent-connections", 5, "number of concurrent connections")
-	pflag.String("port", "1234", "tcp port where to start the server")
+	pflag.String("port", "4000", "tcp port where to start the server")
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	err := viper.BindPFlags(pflag.CommandLine)
@@ -25,7 +25,7 @@ func main() {
 	connections := viper.GetInt("concurrent-connections")
 	port := viper.GetString("port")
 	profile := viper.GetBool("profile")
-
+	log.Printf("profile: %t", profile)
 	if profile {
 		f, err := os.Create("numbers_cpu.prof")
 		if err != nil {
@@ -34,7 +34,7 @@ func main() {
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 
-		men, err := os.Create("numbers_men.prof")
+		/*men, err := os.Create("numbers_men.prof")
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -42,7 +42,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer f.Close()
+		defer f.Close()*/
 	}
 
 	numbers.StartNumberServer(context.Background(), connections, "localhost:"+port)

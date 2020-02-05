@@ -11,66 +11,83 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-const numberControllersBufferSize = 10000
-const numberWriterBufferSize = 100000
+const numberControllersBufferSize = 1000000
+const numberWriterBufferSize = 10000000
 const reportPeriod = 10
 const numberLogFileName = "numbers.log"
 
 func StartNumberServer(ctx context.Context, concurrentConnections int, address string) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if concurrentConnections < 0 {
+		log.Panicf("concurrency level should be more than 0, not %d", concurrentConnections)
+	}
 
-	numbersController, numbersOut, terminateOut := NewNumbersController(numberControllersBufferSize)
-	deDuplicatedNumbers := NewNumberStore(cctx, reportPeriod, numbersOut, numberWriterBufferSize)
+	terminate := cancelContextWhenTerminateSignal(ctx, cancel)
+	controllers := make([]TCPController, concurrentConnections)
+	listeners := make([]ConnectionListener, concurrentConnections)
+	numbersOuts := make([]chan int, concurrentConnections)
+	for i := 0; i < concurrentConnections; i++ {
+		numbersController, numbersOut := NewNumbersController(numberControllersBufferSize, terminate)
+		cnnListener := NewSingleConnectionListener(numbersController)
+		controllers[i] = numbersController
+		listeners[i] = cnnListener
+		numbersOuts[i] = numbersOut
+	}
+
+	deDuplicatedNumbers := NewNumberStore(cctx, reportPeriod, numbersOuts, numberWriterBufferSize)
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
 	NewFileWriter(cctx, deDuplicatedNumbers, dir+"/"+numberLogFileName)
 
-	cnnListener := NewSingleConnectionListener(numbersController)
-	multipleListener, err := NewMultipleConnectionListener(concurrentConnections, cnnListener)
+	multipleListener, err := NewMultipleConnectionListener(listeners)
 	if err != nil {
 		log.Printf("%+v", err)
 	}
 
+	StartServer(cctx, multipleListener, address)
+}
+
+func cancelContextWhenTerminateSignal(ctx context.Context, cancel context.CancelFunc) chan int {
+	terminate := make(chan int)
 	go func() {
+		defer close(terminate)
 		for {
 			select {
-			case <-terminateOut:
+			case <-terminate:
 				cancel()
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-
-	StartServer(cctx, multipleListener, address)
+	return terminate
 }
 
-func NewNumbersController(bufferSize int) (TCPController, chan int, chan bool) {
-	terminate := make(chan bool)
+func NewNumbersController(bufferSize int, terminate chan int) (TCPController, chan int) {
 	numbers := make(chan int, bufferSize)
-	//duration := time.Duration(5) * time.Second
+	duration := time.Duration(60) * time.Second
 	return func(ctx context.Context, c net.Conn) error {
 		defer closeConnection(c)
 		reader := bufio.NewReader(c)
-		/*err := c.SetReadDeadline(time.Now().Add(duration))
-		if err != nil {
-			return errors.Wrap(err, "SetReadDeadline")
-		}*/
 		for {
-			if checkIfTerminated(ctx) {
-				return errors.Wrapf(ctx.Err(), "client: %s, terminated", c.RemoteAddr().String())
-			}
 			data, err := reader.ReadString('\n')
 			if err != nil {
 				if err == io.EOF {
 					return nil
 				}
 				return errors.Wrap(err, "ReadString")
+			}
+
+			err = c.SetReadDeadline(time.Now().Add(duration))
+			if err != nil {
+				return errors.Wrap(err, "SetReadDeadline")
 			}
 
 			data = strings.TrimSuffix(data, "\n")
@@ -80,13 +97,8 @@ func NewNumbersController(bufferSize int) (TCPController, chan int, chan bool) {
 				return nil
 			}
 
-			if checkIfTerminated(ctx) {
-				return errors.Wrapf(ctx.Err(), "connection: %s, terminated", c.RemoteAddr().String())
-			}
-
 			if data == "terminate" {
-				terminate <- true
-				close(terminate)
+				terminate <- 1
 				close(numbers)
 				return errors.Wrap(fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String()), "terminated")
 			}
@@ -97,25 +109,24 @@ func NewNumbersController(bufferSize int) (TCPController, chan int, chan bool) {
 				return nil
 			}
 
-			if checkIfTerminated(ctx) {
-				return errors.Wrapf(ctx.Err(), "client: %s, terminated", c.RemoteAddr().String())
-			}
-
 			numbers <- number
 		}
 
-	}, numbers, terminate
+	}, numbers
 }
 
-func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBufferSize int) chan int {
-	out := make(chan int, outBufferSize)
+func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int, outBufferSize int) chan int {
+	in := make(chan int, len(ins)*outBufferSize)
+	out := fanIn(ctx, ins, outBufferSize)
+
 	numbers := make(map[int]bool)
 	var total int64 = 0
 	var currentUnique int64 = 0
 	var currentDuplicated int64 = 0
 	ticker := time.NewTicker(time.Duration(reportPeriod) * time.Second)
+
 	store := func(ctx context.Context) {
-		defer close(out)
+		defer close(in)
 		for {
 			select {
 			case <-ctx.Done():
@@ -142,6 +153,34 @@ func NewNumberStore(ctx context.Context, reportPeriod int, in chan int, outBuffe
 		}
 	}
 	go store(ctx)
+	return out
+}
+
+func fanIn(ctx context.Context, ins []chan int, outBufferSize int) chan int {
+	var wg sync.WaitGroup
+	wg.Add(len(ins))
+	out := make(chan int, outBufferSize)
+	go func() {
+		for _, ch := range ins {
+			go func(in chan int) {
+				defer wg.Done()
+				for {
+					select {
+					case element, more := <-in:
+						if more {
+							out <- element
+						} else {
+							return
+						}
+					case <-ctx.Done():
+						return
+					}
+				}
+			}(ch)
+		}
+		wg.Wait()
+		close(out)
+	}()
 	return out
 }
 

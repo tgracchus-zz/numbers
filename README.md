@@ -17,4 +17,4 @@ profile2 tgracchus/numbers.NewNumbersController.func1
 
 add buffer writer
 
-go tool pprof numbers2.prof
+go tool pprof numbers_cpu.prof

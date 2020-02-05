@@ -63,7 +63,7 @@ func TestNewMultipleConnectionListener(t *testing.T) {
 
 	controller := NewMockTcpController(t, expectedNumber+"\n", nil)
 	cnnListener := numbers.NewSingleConnectionListener(controller)
-	multipleCnnListener, err := numbers.NewMultipleConnectionListener(2, cnnListener)
+	multipleCnnListener, err := numbers.NewMultipleConnectionListener([]numbers.ConnectionListener{cnnListener})
 	if err != nil {
 		t.Fatal(err)
 	}

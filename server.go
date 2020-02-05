@@ -2,7 +2,6 @@ package numbers
 
 import (
 	"context"
-	"fmt"
 	"github.com/pkg/errors"
 	"log"
 	"net"
@@ -12,8 +11,10 @@ type ConnectionListener func(ctx context.Context, l net.Listener)
 
 type TCPController func(ctx context.Context, c net.Conn) error
 
+type TCPControllerFactory func(bufferSize int) (TCPController, chan int, chan bool)
+
 func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
-	conf := &net.ListenConfig{KeepAlive: 1000}
+	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
 		log.Printf("%+v", errors.Wrap(err, "StartConnectionListener"))
@@ -46,18 +47,11 @@ func closeListener(l net.Listener) {
 	}
 }
 
-func NewMultipleConnectionListener(concurrencyLevel int, cnnHandler ConnectionListener) (ConnectionListener, error) {
-	if concurrencyLevel < 0 {
-		return nil, fmt.Errorf("concurrency level should be more than 0, not %d", concurrencyLevel)
-	}
+func NewMultipleConnectionListener(cnnHandlers [] ConnectionListener) (ConnectionListener, error) {
 	return func(ctx context.Context, l net.Listener) {
-		for i := 0; i < concurrencyLevel; i++ {
-			listener := func(connection int) {
-				log.Printf("creating connection handler: %d", connection)
-				cnnHandler(ctx, l)
-				log.Printf("closing connection handler: %d", connection)
-			}
-			go listener(i)
+		for i := 0; i < len(cnnHandlers); i++ {
+			log.Printf("creating connection handler: %d", i)
+			go cnnHandlers[i](ctx, l)
 		}
 		<-ctx.Done()
 	}, nil
@@ -71,15 +65,18 @@ func NewSingleConnectionListener(controller TCPController) ConnectionListener {
 			}
 			c, err := l.Accept()
 			if err != nil {
-				log.Printf("%+v", errors.Wrap(err, "accept connection"))
+				if err.Error() == "use of closed network connection" {
+					return
+				}
+
+				log.Printf("%v", errors.Wrap(err, "accept connection"))
 			}
 			if checkIfTerminated(ctx) {
 				return
 			}
-
 			err = controller(ctx, c)
 			if err != nil {
-				log.Printf("%+v", errors.Wrap(err, "controller error"))
+				log.Printf("%v", errors.Wrap(err, "controller error"))
 			}
 		}
 	}
