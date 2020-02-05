@@ -33,16 +33,6 @@ func main() {
 		}
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
-
-		/*men, err := os.Create("numbers_men.prof")
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = pprof.WriteHeapProfile(men)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()*/
 	}
 
 	numbers.StartNumberServer(context.Background(), connections, "localhost:"+port)
