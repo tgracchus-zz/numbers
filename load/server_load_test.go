@@ -12,14 +12,11 @@ import (
 func testServer(clientsNumber int, reqs int, port string) {
 	var wg sync.WaitGroup
 	wg.Add(clientsNumber)
-	//ctx, cancel := context.WithCancel(context.Background())
-	//defer cancel()
-	//go numbers.StartNumberServer(ctx, concurrentConnections, "localhost:"+port)
 	clients(&wg, clientsNumber, reqs, port)
 	wg.Wait()
-	//sendTerminate(port)
-	//cancel()
+	sendTerminate(port)
 }
+
 func TestServerBaseline(t *testing.T) {
 	testServer(5, 400000, "4000")
 }
