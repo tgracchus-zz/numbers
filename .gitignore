@@ -2,3 +2,6 @@
 *.iml
 distributions/
 *.log
+numbers.log
+numbers_cpu.prof
+numbers
