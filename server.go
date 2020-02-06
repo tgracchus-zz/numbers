@@ -8,42 +8,35 @@ import (
 )
 
 // ConnectionListener given a listener it listen and establish connections.
-type ConnectionListener func(ctx context.Context, l net.Listener)
+type ConnectionListener interface {
+	Listen(ctx context.Context, l net.Listener)
+	Close()
+}
 
 // TCPController is executed when a ConnectionListener establish a connection,
 // it defines the way to handle a connection.
-type TCPController func(ctx context.Context, c net.Conn) error
+type TCPController interface {
+	Handle(ctx context.Context, c net.Conn) error
+	Close()
+}
 
 // StartServer starts the server with the given connection listener and at the given address.
 func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Printf("%v", errors.Wrap(err, "StartConnectionListener"))
+		log.Printf("%v", errors.Wrap(err, "Star listener"))
 		return
 	}
 	defer closeListener(l)
 	log.Printf("server started at:%s", address)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	//Cancel
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				cancel()
-				log.Printf("%v", "closing listener")
-				closeListener(l)
-				return
-			}
-		}
-	}()
-
-	connectionListener(ctx, l)
+	go connectionListener.Listen(ctx, l)
+	<-ctx.Done()
+	return
 }
 
 func closeListener(l net.Listener) {
+	log.Printf("%v", "closing listener")
 	if err := l.Close(); err != nil {
 		log.Printf("%v", errors.Wrap(err, "Closing listener"))
 	}
@@ -51,47 +44,64 @@ func closeListener(l net.Listener) {
 
 // NewMultipleConnectionListener starts has many instances as given in separate goroutines and waits the
 // context to be cancelled.
-func NewMultipleConnectionListener(cnnHandlers [] ConnectionListener) (ConnectionListener, error) {
-	return func(ctx context.Context, l net.Listener) {
-		for i := 0; i < len(cnnHandlers); i++ {
-			log.Printf("creating connection handler: %d", i)
-			go cnnHandlers[i](ctx, l)
-		}
-		<-ctx.Done()
-	}, nil
+func NewMultipleConnectionListener(listeners [] ConnectionListener) ConnectionListener {
+	return &multipleListener{listeners: listeners}
+}
+
+type multipleListener struct {
+	listeners [] ConnectionListener
+}
+
+func (ml *multipleListener) Listen(ctx context.Context, l net.Listener) {
+	for i := 0; i < len(ml.listeners); i++ {
+		go func(index int) {
+			log.Printf("creating connection handler: %d", index)
+			ml.listeners[index].Listen(ctx, l)
+		}(i)
+	}
+}
+
+func (ml *multipleListener) Close() {
+	for _, listener := range ml.listeners {
+		listener.Close()
+	}
 }
 
 // NewSingleConnectionListener creates a new ConnectionListener which listen for a connection
 // and then it calls the given TCPController in a sync way.
 func NewSingleConnectionListener(controller TCPController) ConnectionListener {
-	return func(ctx context.Context, l net.Listener) {
-		for {
-			if listenOnce(ctx, l, controller) {
-				return
-			}
+	return &defaultListener{controller: controller}
+}
+
+type defaultListener struct {
+	controller TCPController
+}
+
+func (dl *defaultListener) Listen(ctx context.Context, l net.Listener) {
+	for {
+		if err := listenOnce(ctx, l, dl.controller); err != nil {
+			log.Printf("%v", err)
+			return
 		}
 	}
 }
 
-func listenOnce(ctx context.Context, l net.Listener, controller TCPController) bool {
-	if checkIfTerminated(ctx) {
-		return true
-	}
+func (dl *defaultListener) Close() {
+	dl.controller.Close()
+}
+
+func listenOnce(ctx context.Context, l net.Listener, controller TCPController) error {
 	c, err := l.Accept()
 	if err != nil {
-		log.Printf("%v", errors.Wrap(err, "accept connection"))
-		return true
+		return errors.Wrap(err, "accept connection")
 	}
 	defer closeConnection(c)
-
-	if checkIfTerminated(ctx) {
-		return true
-	}
-	err = controller(ctx, c)
+	err = controller.Handle(ctx, c)
 	if err != nil {
 		log.Printf("%v", errors.Wrap(err, "controller error"))
+		return nil
 	}
-	return false
+	return nil
 }
 
 func closeConnection(c net.Conn) {
@@ -99,14 +109,5 @@ func closeConnection(c net.Conn) {
 		if err := c.Close(); err != nil {
 			log.Printf("%v", errors.Wrap(err, "closeConnection"))
 		}
-	}
-}
-
-func checkIfTerminated(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
 	}
 }

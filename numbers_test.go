@@ -18,8 +18,10 @@ import (
 func TestNumbersControllerReadNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
+	numbersIn := make(chan int)
 	defer close(terminated)
-	numbersProtocol, numbersIn := numbers.NewNumbersController(terminated)
+	defer close(numbersIn)
+	numbersProtocol := numbers.NewNumbersController(terminated, numbersIn)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -40,8 +42,10 @@ func TestNumbersControllerReadNumber(t *testing.T) {
 func TestNumbersControllerNotNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
+	numbersIn := make(chan int)
 	defer close(terminated)
-	numbersProtocol, numbersIn := numbers.NewNumbersController(terminated)
+	defer close(numbersIn)
+	numbersProtocol := numbers.NewNumbersController(terminated, numbersIn)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -60,8 +64,10 @@ func TestNumbersControllerNotNumber(t *testing.T) {
 func TestNumbersControllerClosedConnection(t *testing.T) {
 	server, _ := net.Pipe()
 	terminated := make(chan int)
+	numbersIn := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(terminated)
+	defer close(numbersIn)
+	numbersProtocol := numbers.NewNumbersController(terminated, numbersIn)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -79,8 +85,10 @@ func TestNumbersControllerClosedConnection(t *testing.T) {
 func TestNumbersControllerContextCancelled(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
+	numbersIn := make(chan int)
 	defer close(terminated)
-	numbersProtocol, numbersIn := numbers.NewNumbersController(terminated)
+	defer close(numbersIn)
+	numbersProtocol := numbers.NewNumbersController(terminated, numbersIn)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -101,8 +109,10 @@ func TestNumbersControllerContextCancelled(t *testing.T) {
 func TestNumbersControllerTerminate(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
+	numbersIn := make(chan int)
 	defer close(terminated)
-	numbersProtocol, _ := numbers.NewNumbersController(terminated)
+	defer close(numbersIn)
+	numbersProtocol := numbers.NewNumbersController(terminated, numbersIn)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

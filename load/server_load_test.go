@@ -14,7 +14,10 @@ func testServer(clientsNumber int, reqs int, address string) {
 	wg.Add(clientsNumber)
 	clients(&wg, clientsNumber, reqs, address)
 	wg.Wait()
-	sendTerminate(address)
+}
+
+func TestServerTerminate(t *testing.T) {
+	testServer(4, 400000, "localhost:4000")
 }
 
 func TestServerBaseline(t *testing.T) {

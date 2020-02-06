@@ -102,7 +102,6 @@ func newMockTcpController(t *testing.T, cancel context.CancelFunc, expectedData 
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		if data != expectedData {
 			t.Fatal(fmt.Errorf("expected %s but got %s", expectedData, data))
 		}

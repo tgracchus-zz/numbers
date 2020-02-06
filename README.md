@@ -85,7 +85,7 @@ netpoll, runtime scheduling and I guess channel waiting in the form of pthread_c
 1.- First, make sure tcp connections are ok, for that we can query netstat and make sure connections   
 are opened and closed
 ```bash
-sudo netstat -anp tcp | grep 127.0.0.1.4000
+netstat -anp tcp | grep 127.0.0.1.4000
 ```
 2.- Go profiling tools:
 In th repo there's a cpu profile of the server when running the load test inside test folder.

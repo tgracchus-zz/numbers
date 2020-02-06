@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"log"
@@ -35,5 +34,5 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	numbers.StartNumberServer(context.Background(), connections, "localhost:"+port)
+	numbers.StartNumberServer(connections, "localhost:"+port)
 }
