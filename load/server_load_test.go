@@ -9,12 +9,12 @@ import (
 	"testing"
 )
 
-func testServer(clientsNumber int, reqs int, port string) {
+func testServer(clientsNumber int, reqs int, address string) {
 	var wg sync.WaitGroup
 	wg.Add(clientsNumber)
-	clients(&wg, clientsNumber, reqs, port)
+	clients(&wg, clientsNumber, reqs, address)
 	wg.Wait()
-	sendTerminate(port)
+	sendTerminate(address)
 }
 
 func TestServerBaseline(t *testing.T) {
@@ -84,10 +84,10 @@ func sendTerminate(address string) {
 	send(conn, "terminate\n")
 }
 
-func client(wg *sync.WaitGroup, barrier *sync.WaitGroup, clientNumber int, reqs int, port string) {
+func client(wg *sync.WaitGroup, barrier *sync.WaitGroup, clientNumber int, reqs int, address string) {
 	barrier.Wait()
 	dialer := net.Dialer{KeepAlive: 15}
-	conn, err := dialer.Dial("tcp", "localhost:"+port)
+	conn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		log.Printf("Client %d connection error: %s", clientNumber, err)
 		return
