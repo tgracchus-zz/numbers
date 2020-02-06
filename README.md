@@ -3,8 +3,8 @@
 ## Language and performance
 Give the requirements, it looks like the app is going to be low level (tcp, not app protocol) 
 network intensive and with high concurrency and contention, given the need keep track totals counts    
-and a write to a single file. That, along the need for high performance code, make me   
-think than golang is a good fit.
+and a write to a single file. That, along the need for high performance code, make me think than golang    
+is a good fit.
 
 So, the following structure is used:
 ```
