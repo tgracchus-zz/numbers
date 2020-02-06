@@ -7,10 +7,14 @@ import (
 	"net"
 )
 
+// ConnectionListener given a listener it listen and establish connections.
 type ConnectionListener func(ctx context.Context, l net.Listener)
 
+// TCPController is executed when a ConnectionListener establish a connection,
+// it defines the way to handle a connection.
 type TCPController func(ctx context.Context, c net.Conn) error
 
+// StartServer starts the server with the given connection listener and at the given address.
 func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
@@ -45,6 +49,8 @@ func closeListener(l net.Listener) {
 	}
 }
 
+// NewMultipleConnectionListener starts has many instances as given in separate goroutines and waits the
+// context to be cancelled.
 func NewMultipleConnectionListener(cnnHandlers [] ConnectionListener) (ConnectionListener, error) {
 	return func(ctx context.Context, l net.Listener) {
 		for i := 0; i < len(cnnHandlers); i++ {
@@ -55,6 +61,8 @@ func NewMultipleConnectionListener(cnnHandlers [] ConnectionListener) (Connectio
 	}, nil
 }
 
+// NewSingleConnectionListener creates a new ConnectionListener which listen for a connection
+// and then it calls the given TCPController in a sync way.
 func NewSingleConnectionListener(controller TCPController) ConnectionListener {
 	return func(ctx context.Context, l net.Listener) {
 		for {

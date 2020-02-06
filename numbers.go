@@ -18,6 +18,8 @@ import (
 const reportPeriod = 10
 const numberLogFileName = "numbers.log"
 
+// StartNumberServer start the number server tcp application with
+// number of concurrent server connections and at the given address.
 func StartNumberServer(ctx context.Context, concurrentConnections int, address string) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -68,6 +70,9 @@ func cancelContextWhenTerminateSignal(ctx context.Context, cancel context.Cancel
 	return terminate
 }
 
+// NewNumbersController is the numbers app controller. It handles the parsing protocol defined in the requirements.
+// Accepts a channel terminate to send termination signal and return a channel from where the numbers will be issued
+// once they are parsed.
 func NewNumbersController(terminate chan int) (TCPController, chan int) {
 	numbers := make(chan int)
 	duration := time.Duration(60) * time.Second
@@ -113,6 +118,9 @@ func NewNumbersController(terminate chan int) (TCPController, chan int) {
 	}, numbers
 }
 
+// NewNumberStore given a list of channels it listens to all of them and deduplicated the numbers received.
+// If the number is not duplicated handles it to the returned channel for further processing.
+// It also keeps track of total and unique numbers and the current 10s windows of unique and duplicated numbers.
 func NewNumberStore(ctx context.Context, reportPeriod int, ins []chan int) chan int {
 	out := make(chan int)
 	in := fanIn(ctx, ins)
@@ -181,6 +189,7 @@ func fanIn(ctx context.Context, ins []chan int) chan int {
 	return out
 }
 
+// NewFileWriter writes al the numbers received at in channel and writes them to filePath.
 func NewFileWriter(ctx context.Context, in chan int, filePath string) {
 	f, err := os.Create(filePath)
 	if err != nil {

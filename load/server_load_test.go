@@ -18,65 +18,65 @@ func testServer(clientsNumber int, reqs int, port string) {
 }
 
 func TestServerBaseline(t *testing.T) {
-	testServer(5, 400000, "4000")
+	testServer(5, 400000, "localhost:4000")
 }
 
 func TestServer_5connections_1clients_10000reqs(t *testing.T) {
-	testServer(1, 1000, "4000")
+	testServer(1, 1000, "localhost:4000")
 }
 
 func TestServer_5connections_5clients_1000reqs(t *testing.T) {
-	testServer(5, 1000, "4000")
+	testServer(5, 1000, "localhost:4000")
 }
 
 func TestServer_5connections_10clients_1000reqs(t *testing.T) {
-	testServer(10, 1000, "4000")
+	testServer(10, 1000, "localhost:4000")
 }
 
 func TestServer_5connections_5clients_10000reqs(t *testing.T) {
-	testServer(5, 10000, "4000")
+	testServer(5, 10000, "localhost:4000")
 }
 
 func TestServer_5connections_5clients_100000reqs(t *testing.T) {
-	testServer(5, 100000, "4000")
+	testServer(5, 100000, "localhost:4000")
 }
 
 func TestServer_5connections_5clients_1000000reqs(t *testing.T) {
-	testServer(5, 1000000, "4000")
+	testServer(5, 1000000, "localhost:4000")
 }
 
 func TestServer_5connections_10clients_10000reqs(t *testing.T) {
-	testServer(10, 10000, "4000")
+	testServer(10, 10000, "localhost:4000")
 }
 
 func TestServer_5connections_10clients_100000reqs(t *testing.T) {
-	testServer(10, 100000, "4000")
+	testServer(10, 100000, "localhost:4000")
 }
 
 func TestServer_5connections_10clients_1000000reqs(t *testing.T) {
-	testServer(10, 1000000, "4000")
+	testServer(10, 1000000, "localhost:4000")
 }
 
 func TestServer_5connections_50clients_10000reqs(t *testing.T) {
-	testServer(50, 10000, "4000")
+	testServer(50, 10000, "localhost:4000")
 }
 
 func TestServe_50connections_100clients_10000reqs(t *testing.T) {
-	testServer(10, 10000, "4000")
+	testServer(10, 10000, "localhost:4000")
 }
 
-func clients(wg *sync.WaitGroup, totalClients int, reqs int, port string) {
+func clients(wg *sync.WaitGroup, totalClients int, reqs int, address string) {
 	var barrier sync.WaitGroup
 	barrier.Add(1)
 	for clientNumber := 0; clientNumber < totalClients; clientNumber++ {
-		go client(wg, &barrier, clientNumber, reqs, port)
+		go client(wg, &barrier, clientNumber, reqs, address)
 	}
 	barrier.Done()
 }
 
-func sendTerminate(port string) {
+func sendTerminate(address string) {
 	dialer := net.Dialer{KeepAlive: 15}
-	conn, err := dialer.Dial("tcp", "localhost:"+port)
+	conn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		log.Printf("Client connection error: %s", err)
 	}
