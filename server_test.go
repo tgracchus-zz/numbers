@@ -10,30 +10,20 @@ import (
 )
 
 func TestNewSingleConnectionListener(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	server, client := net.Pipe()
-	expectedNumber := "098765432"
-
-	sendData(t, client, expectedNumber)
-	terminate := make(chan int)
-	cnnListener, out := numbers.NewSingleConnectionListener(numbers.DefaultTCPController, terminate)
-	go cnnListener(ctx, &mockListener{connection: server})
-	expectNumber(out, 98765432, t)
-	sendData(t, client, "terminate")
-}
-
-func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	server, client := net.Pipe()
 	expectedNumber := "098765432"
 	sendData(t, client, expectedNumber)
 
-	terminate := make(chan int)
-	cnnListener, _ := numbers.NewSingleConnectionListener(numbers.DefaultTCPController, terminate)
-	go cnnListener(ctx, &mockListener{connection: server})
+	connections := numbers.NewSingleConnectionListener(&mockListener{connection: server})
+	ticker := time.NewTicker(time.Second)
+	select {
+	case connection := <-connections:
+		if connection != server {
+			t.Fatal("expected server connection here")
+		}
+	case <-ticker.C:
+		t.Fatal("expected connection here")
+	}
 }
 
 func newMockConnectionListener(t *testing.T, ctx context.Context, cancel context.CancelFunc) numbers.ConnectionListener {
