@@ -2,7 +2,6 @@ package numbers_test
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"github.com/google/uuid"
 	"log"
@@ -18,38 +17,42 @@ import (
 func TestNumbersControllerReadNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
-	numbersIn := make(chan int)
+	c := make(chan net.Conn)
 	defer close(terminated)
-	defer close(numbersIn)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	wireNumber := "098765432"
 	expectedNumber, err := strconv.Atoi(wireNumber)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sendData(t, client, wireNumber)
-	go numbers.DefaultTCPController(ctx, server, numbersIn, terminated)
 
-	number := <-numbersIn
-	if expectedNumber != number {
-		t.Fatal(fmt.Errorf("number should be: %d not %d", expectedNumber, number))
+	sendData(t, client, wireNumber)
+	numbersIn := numbers.DefaultTCPController(c, terminated)
+	c <- server
+
+	ticker := time.NewTicker(time.Second)
+	select {
+	case number := <-numbersIn:
+		if expectedNumber != number {
+			t.Fatal(fmt.Errorf("number should be: %d not %d", expectedNumber, number))
+		}
+	case <-ticker.C:
+		t.Fatal(fmt.Errorf("number expected %d", expectedNumber))
 	}
+
 }
 
 func TestNumbersControllerNotNumber(t *testing.T) {
 	server, client := net.Pipe()
 	terminated := make(chan int)
-	numbersIn := make(chan int)
+	c := make(chan net.Conn)
 	defer close(terminated)
-	defer close(numbersIn)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	wireText := "IAMTEXT!!"
 	sendData(t, client, wireText)
-	go numbers.DefaultTCPController(ctx, server, numbersIn, terminated)
+	numbersIn := numbers.DefaultTCPController(c, terminated)
+	c <- server
+
 	ticker := time.NewTicker(time.Second)
 	select {
 	case number := <-numbersIn:
@@ -61,20 +64,21 @@ func TestNumbersControllerNotNumber(t *testing.T) {
 func TestNumbersControllerClosedConnection(t *testing.T) {
 	server, _ := net.Pipe()
 	terminated := make(chan int)
-	numbersIn := make(chan int)
 	defer close(terminated)
-	defer close(numbersIn)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	err := server.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
+	c := make(chan net.Conn)
+	numbersIn := numbers.DefaultTCPController(c, terminated)
 
-	err = numbers.DefaultTCPController(ctx, server, numbersIn, terminated)
-	if err == nil {
-		t.Fatal("io: read/write on closed pipe was expected when parsing a text")
+	c <- server
+	ticker := time.NewTicker(time.Second)
+	select {
+	case number := <-numbersIn:
+		t.Fatal(fmt.Errorf("non expected number:%d", number))
+	case <-ticker.C:
 	}
 }
 
@@ -83,8 +87,6 @@ func TestNumbersControllerTerminate(t *testing.T) {
 	terminated := make(chan int)
 	numbersIn := make(chan int)
 	defer close(numbersIn)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	sendData(t, client, "terminate")
 
@@ -100,10 +102,10 @@ func TestNumbersControllerTerminate(t *testing.T) {
 		}
 	}()
 
-	err := numbers.DefaultTCPController(ctx, server, numbersIn, terminated)
-	if err == nil {
-		t.Fatal("connection: pipe, terminated is expected")
-	}
+	c := make(chan net.Conn)
+	numbersIn = numbers.DefaultTCPController(c, terminated)
+	c <- server
+
 	wg.Wait()
 	if more {
 		t.Fatal("a termkill signal is expected in the terminated channel")

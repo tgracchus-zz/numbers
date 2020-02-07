@@ -2,7 +2,6 @@ package numbers
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"github.com/pkg/errors"
 	"io"
@@ -16,99 +15,67 @@ import (
 )
 
 const reportPeriod = 10
-const numberLogFileName = "numbers.log"
-
-// StartNumberServer start the number server tcp application with
-// number of concurrent server connections and at the given address.
-func StartNumberServer(concurrentConnections int, address string) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if concurrentConnections < 0 {
-		log.Panicf("concurrency level should be more than 0, not %d", concurrentConnections)
-	}
-	terminate := make(chan int)
-	listeners := make([]ConnectionListener, concurrentConnections)
-	numbersOuts := make([]chan int, concurrentConnections)
-	for i := 0; i < concurrentConnections; i++ {
-		cnnListener, numbers := NewSingleConnectionListener(DefaultTCPController, terminate)
-		listeners[i] = cnnListener
-		numbersOuts[i] = numbers
-	}
-	deDuplicatedNumbers := NumberStore(reportPeriod, numbersOuts, terminate)
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-	done := FileWriter(deDuplicatedNumbers, dir+"/"+numberLogFileName)
-	multipleListener := NewMultipleConnectionListener(listeners)
-
-	cancelContextWhenTerminateSignal(cancel, terminate, done)
-	err = StartServer(ctx, multipleListener, address, done)
-	if err != nil {
-		log.Printf("%v", err)
-	}
-}
-
-func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
-	terminate chan int, done chan int) chan int {
-	go func() {
-		for {
-			select {
-			case <-terminate:
-				cancel()
-			case <-done:
-				return
-			}
-		}
-	}()
-	return terminate
-}
-
 const readDeadline = 30 * time.Second
 
 // DefaultTCPController handles the parsing protocol defined in the requirements.
 // Accepts a channel terminate to send termination signal and return a channel from where the numbers will be issued
 // once they are parsed.
-func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, terminate chan int) error {
-	reader := bufio.NewReader(c)
-	for {
-		err := c.SetReadDeadline(time.Now().Add(readDeadline))
-		if err != nil {
-			return errors.Wrap(err, "SetReadDeadline")
-		}
-		data, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return errors.Wrap(err, "ReadString")
-		}
+func DefaultTCPController(cs chan net.Conn, terminate chan int) chan int {
+	numbers := make(chan int)
+	go func() {
+		for c := range cs {
+			reader := bufio.NewReader(c)
+			for {
+				err := c.SetReadDeadline(time.Now().Add(readDeadline))
+				if err != nil {
+					log.Printf("%v", errors.Wrap(err, "SetReadDeadline"))
+					closeConnection(c)
+					break
+				}
+				data, err := reader.ReadString('\n')
+				if err != nil {
+					if err == io.EOF {
+						closeConnection(c)
+						break
+					}
+					log.Printf("%v", errors.Wrap(err, "ReadString"))
+					break
+				}
+				data = strings.TrimSuffix(data, "\n")
+				if len(data) != 9 {
+					closeConnection(c)
+					log.Printf("%v", errors.Wrap(fmt.Errorf("client: %s, no 9 char length string %s", c.RemoteAddr().String(), data), "check for 9 digits"))
+					break
+				}
+				if data == "terminate" {
+					select {
+					case <-terminate:
+						closeConnection(c)
+						return
+					default:
+						close(terminate)
+						closeConnection(c)
+						log.Printf("terminating server")
+						return
+					}
+				}
+				number, err := strconv.Atoi(data)
+				if err != nil {
+					closeConnection(c)
+					break
+				}
 
-		data = strings.TrimSuffix(data, "\n")
-		if len(data) != 9 {
-			return errors.Wrap(fmt.Errorf("client: %s, no 9 char length string %s", c.RemoteAddr().String(), data), "check for 9 digits")
-		}
-		if data == "terminate" {
-			select {
-			case <-terminate:
-				return TERMINATED
-			default:
-				close(terminate)
+				select {
+				case <-terminate:
+					closeConnection(c)
+					return
+				default:
+					numbers <- number
+				}
 			}
-			return TERMINATED
 		}
-		number, err := strconv.Atoi(data)
-		if err != nil {
-			return errors.Wrap(err, "strconv.Atoi")
-		}
-
-		select {
-		case <-terminate:
-			return TERMINATED
-		default:
-			numbers <- number
-		}
-	}
+	}()
+	return numbers
 }
 
 // NumberStore given a list of channels it listens to all of them and deduplicated the numbers received.
@@ -116,7 +83,7 @@ func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, ter
 // It also keeps track of total and unique numbers and the current 10s windows of unique and duplicated numbers.
 func NumberStore(reportPeriod int, ins []chan int, terminate chan int) chan int {
 	out := make(chan int)
-	in := fanIn(ins, terminate)
+	in := fanInNumbers(ins, terminate)
 	numbers := make(map[int]bool)
 	var total int64 = 0
 	var currentUnique int64 = 0
@@ -151,7 +118,7 @@ func NumberStore(reportPeriod int, ins []chan int, terminate chan int) chan int 
 	return out
 }
 
-func fanIn(ins []chan int, terminate chan int) chan int {
+func fanInNumbers(ins []chan int, terminate chan int) chan int {
 	var wg sync.WaitGroup
 	wg.Add(len(ins))
 	out := make(chan int)

@@ -5,26 +5,67 @@ import (
 	"github.com/pkg/errors"
 	"log"
 	"net"
+	"os"
 )
+
+const numberLogFileName = "numbers.log"
 
 // ConnectionListener given a listener it listen and establish connections.
 type ConnectionListener func(ctx context.Context, l net.Listener)
 
 type TCPController func(ctx context.Context, c net.Conn, numbers chan int, terminate chan int) error
 
-// StartServer starts the server with the given connection listener and at the given address.
-func StartServer(ctx context.Context, connectionListener ConnectionListener, address string, stop chan int) error {
+// StartNumberServer start the number server tcp application with
+// number of concurrent server connections and at the given address.
+func StartNumberServer(concurrentConnections int, address string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if concurrentConnections < 0 {
+		log.Panicf("concurrency level should be more than 0, not %d", concurrentConnections)
+	}
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
 		log.Printf("%v", errors.Wrap(err, "Star listener"))
-		return err
+		return
 	}
 	defer closeListener(l)
 	log.Printf("server started at:%s", address)
-	go connectionListener(ctx, l)
-	<-stop
-	return nil
+
+	connections := NewSingleConnectionListener(l)
+
+	terminate := make(chan int)
+	numbersOuts := make([]chan int, concurrentConnections)
+	for i := 0; i < concurrentConnections; i++ {
+		numbers := DefaultTCPController(connections, terminate)
+		numbersOuts[i] = numbers
+	}
+
+	deDuplicatedNumbers := NumberStore(reportPeriod, numbersOuts, terminate)
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	done := FileWriter(deDuplicatedNumbers, dir+"/"+numberLogFileName)
+
+	cancelContextWhenTerminateSignal(cancel, terminate, done)
+
+	<-done
+}
+
+func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
+	terminate chan int, done chan int) chan int {
+	go func() {
+		for {
+			select {
+			case <-terminate:
+				cancel()
+			case <-done:
+				return
+			}
+		}
+	}()
+	return terminate
 }
 
 func closeListener(l net.Listener) {
@@ -34,51 +75,22 @@ func closeListener(l net.Listener) {
 	}
 }
 
-// NewMultipleConnectionListener starts has many instances as given in separate goroutines and waits the
-// context to be cancelled.
-func NewMultipleConnectionListener(listeners [] ConnectionListener) ConnectionListener {
-	return func(ctx context.Context, l net.Listener) {
-		for i := 0; i < len(listeners); i++ {
-			go func(index int) {
-				log.Printf("creating connection handler: %d", index)
-				listeners[index](ctx, l)
-			}(i)
-		}
-	}
-}
-
 // NewSingleConnectionListener creates a new ConnectionListener which listen for a connection
 // and then it calls the given TCPController in a sync way.
-func NewSingleConnectionListener(controller TCPController, terminate chan int) (ConnectionListener, chan int) {
-	numbers := make(chan int)
-	return func(ctx context.Context, l net.Listener) {
-		defer close(numbers)
+func NewSingleConnectionListener(l net.Listener) chan net.Conn {
+	connections := make(chan net.Conn)
+	go func() {
+		defer close(connections)
 		for {
-			if err := listenOnce(ctx, l, controller, numbers, terminate); err != nil {
-				log.Printf("%v", err)
+			c, err := l.Accept()
+			if err != nil {
+				log.Printf("%v", errors.Wrap(err, "accept connection"))
 				return
 			}
+			connections <- c
 		}
-	}, numbers
-}
-
-var TERMINATED = errors.New("TERMINATED")
-
-func listenOnce(ctx context.Context, l net.Listener, controller TCPController, numbers chan int, terminate chan int) error {
-	c, err := l.Accept()
-	if err != nil {
-		return errors.Wrap(err, "accept connection")
-	}
-	defer closeConnection(c)
-	err = controller(ctx, c, numbers, terminate)
-	if err != nil {
-		if err == TERMINATED {
-			return err
-		}
-		log.Printf("%v", errors.Wrap(err, "controller error"))
-		return nil
-	}
-	return nil
+	}()
+	return connections
 }
 
 func closeConnection(c net.Conn) {
