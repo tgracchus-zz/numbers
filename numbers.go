@@ -27,38 +27,34 @@ func StartNumberServer(concurrentConnections int, address string) {
 		log.Panicf("concurrency level should be more than 0, not %d", concurrentConnections)
 	}
 	terminate := make(chan int)
-	controllers := make([]TCPController, concurrentConnections)
 	listeners := make([]ConnectionListener, concurrentConnections)
 	numbersOuts := make([]chan int, concurrentConnections)
 	for i := 0; i < concurrentConnections; i++ {
-		numbersController, numbers := NewNumbersController(terminate)
-		cnnListener := NewSingleConnectionListener(numbersController)
-		controllers[i] = numbersController
+		cnnListener, numbers := NewSingleConnectionListener(DefaultTCPController, terminate)
 		listeners[i] = cnnListener
 		numbersOuts[i] = numbers
 	}
-	deDuplicatedNumbers := NewNumberStore(reportPeriod, numbersOuts)
+	deDuplicatedNumbers := NumberStore(reportPeriod, numbersOuts)
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
-	done := NewFileWriter(deDuplicatedNumbers, dir+"/"+numberLogFileName)
+	done := FileWriter(deDuplicatedNumbers, dir+"/"+numberLogFileName)
 	multipleListener := NewMultipleConnectionListener(listeners)
 
-	cancelContextWhenTerminateSignal(cancel, multipleListener, terminate, done)
+	cancelContextWhenTerminateSignal(cancel, terminate, done)
 	StartServer(ctx, multipleListener, address)
 }
 
-func cancelContextWhenTerminateSignal(cancel context.CancelFunc, listener ConnectionListener,
+func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
 	terminate chan int, done chan int) chan int {
 	go func() {
 		defer close(terminate)
 		for {
 			select {
 			case <-terminate:
-				listener.Close()
-			case <-done:
 				cancel()
+			case <-done:
 				return
 			}
 
@@ -67,32 +63,12 @@ func cancelContextWhenTerminateSignal(cancel context.CancelFunc, listener Connec
 	return terminate
 }
 
-// NewNumbersController is the numbers app controller. It handles the parsing protocol defined in the requirements.
-// Accepts a channel terminate to send termination signal and return a channel from where the numbers will be issued
-// once they are parsed.
-func NewNumbersController(terminate chan int) (TCPController, chan int) {
-	numbers := make(chan int)
-	duration := time.Duration(30) * time.Second
-	return &numbersController{terminate: terminate, numbers: numbers, duration: duration}, numbers
-}
+const readDeadline = 30 * time.Second
 
-type numbersController struct {
-	terminate chan int
-	numbers   chan int
-	duration  time.Duration
-}
-
-func (nc *numbersController) Close() {
-	close(nc.numbers)
-}
-
-func (nc *numbersController) Handle(ctx context.Context, c net.Conn) error {
+func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, terminate chan int) error {
 	reader := bufio.NewReader(c)
 	for {
-		if checkIfTerminated(ctx) {
-			return errors.Wrap(fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String()), "terminate check")
-		}
-		err := c.SetReadDeadline(time.Now().Add(nc.duration))
+		err := c.SetReadDeadline(time.Now().Add(readDeadline))
 		if err != nil {
 			return errors.Wrap(err, "SetReadDeadline")
 		}
@@ -109,21 +85,29 @@ func (nc *numbersController) Handle(ctx context.Context, c net.Conn) error {
 			return errors.Wrap(fmt.Errorf("client: %s, no 9 char length string %s", c.RemoteAddr().String(), data), "check for 9 digits")
 		}
 		if data == "terminate" {
-			nc.terminate <- 1
-			return errors.Wrap(fmt.Errorf("connection: %s, terminated", c.RemoteAddr().String()), "terminate signal")
+			close(terminate)
+			return &terminateError{}
 		}
 		number, err := strconv.Atoi(data)
 		if err != nil {
 			return errors.Wrap(err, "strconv.Atoi")
 		}
-		nc.numbers <- number
+
+		select {
+		case <-terminate:
+			return &terminateError{}
+		default:
+			numbers <- number
+		}
+
+		return nil
 	}
 }
 
-// NewNumberStore given a list of channels it listens to all of them and deduplicated the numbers received.
+// NumberStore given a list of channels it listens to all of them and deduplicated the numbers received.
 // If the number is not duplicated handles it to the returned channel for further processing.
 // It also keeps track of total and unique numbers and the current 10s windows of unique and duplicated numbers.
-func NewNumberStore(reportPeriod int, ins []chan int) chan int {
+func NumberStore(reportPeriod int, ins []chan int) chan int {
 	out := make(chan int)
 	in := fanIn(ins)
 	numbers := make(map[int]bool)
@@ -186,9 +170,9 @@ func fanIn(ins []chan int) chan int {
 	return out
 }
 
-// NewFileWriter writes al the numbers received at in channel and writes them to filePath.
+// FileWriter writes al the numbers received at in channel and writes them to filePath.
 // Returns a done channel when it is terminated
-func NewFileWriter(in chan int, filePath string) chan int {
+func FileWriter(in chan int, filePath string) chan int {
 	done := make(chan int)
 	f, err := os.Create(filePath)
 	if err != nil {
@@ -228,14 +212,5 @@ func closeFile(b *bufio.Writer, f *os.File) {
 	}
 	if err := f.Close(); err != nil {
 		log.Printf("%v", err)
-	}
-}
-
-func checkIfTerminated(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
 	}
 }
