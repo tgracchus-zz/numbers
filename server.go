@@ -13,7 +13,7 @@ type ConnectionListener func(ctx context.Context, l net.Listener)
 type TCPController func(ctx context.Context, c net.Conn, numbers chan int, terminate chan int) error
 
 // StartServer starts the server with the given connection listener and at the given address.
-func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
+func StartServer(ctx context.Context, connectionListener ConnectionListener, address string, stop chan int) {
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
@@ -23,7 +23,7 @@ func StartServer(ctx context.Context, connectionListener ConnectionListener, add
 	defer closeListener(l)
 	log.Printf("server started at:%s", address)
 	go connectionListener(ctx, l)
-	<-ctx.Done()
+	<-stop
 	return
 }
 

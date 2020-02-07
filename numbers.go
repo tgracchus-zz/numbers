@@ -43,13 +43,12 @@ func StartNumberServer(concurrentConnections int, address string) {
 	multipleListener := NewMultipleConnectionListener(listeners)
 
 	cancelContextWhenTerminateSignal(cancel, terminate, done)
-	StartServer(ctx, multipleListener, address)
+	StartServer(ctx, multipleListener, address, done)
 }
 
 func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
 	terminate chan int, done chan int) chan int {
 	go func() {
-		defer close(terminate)
 		for {
 			select {
 			case <-terminate:
@@ -57,7 +56,6 @@ func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
 			case <-done:
 				return
 			}
-
 		}
 	}()
 	return terminate
@@ -65,6 +63,9 @@ func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
 
 const readDeadline = 30 * time.Second
 
+// DefaultTCPController handles the parsing protocol defined in the requirements.
+// Accepts a channel terminate to send termination signal and return a channel from where the numbers will be issued
+// once they are parsed.
 func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, terminate chan int) error {
 	reader := bufio.NewReader(c)
 	for {
@@ -99,8 +100,6 @@ func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, ter
 		default:
 			numbers <- number
 		}
-
-		return nil
 	}
 }
 
@@ -192,7 +191,7 @@ func FileWriter(in chan int, filePath string) chan int {
 						log.Printf("%v", errors.Wrap(err, "Fprintf"))
 					}
 				} else {
-					done <- 1
+					close(done)
 					return
 				}
 			case <-ticker.C:
