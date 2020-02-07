@@ -43,7 +43,10 @@ func StartNumberServer(concurrentConnections int, address string) {
 	multipleListener := NewMultipleConnectionListener(listeners)
 
 	cancelContextWhenTerminateSignal(cancel, terminate, done)
-	StartServer(ctx, multipleListener, address, done)
+	err = StartServer(ctx, multipleListener, address, done)
+	if err != nil {
+		log.Printf("%v", err)
+	}
 }
 
 func cancelContextWhenTerminateSignal(cancel context.CancelFunc,
