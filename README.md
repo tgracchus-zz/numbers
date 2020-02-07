@@ -94,35 +94,30 @@ To sum up the 2M request required in the description
 To start the profiling tool execute
 ```
 go tool pprof numbers_cpu.prof
-Type: cpu
-Time: Feb 5, 2020 at 10:59pm (CET)
-Duration: 50.03s, Total samples = 17.87s (35.72%)
-Entering interactive mode (type "help" for commands, "o" for options)
 (pprof) top20
-Showing nodes accounting for 17.26s, 96.59% of 17.87s total
-Dropped 77 nodes (cum <= 0.09s)
-Showing top 20 nodes out of 51
+Showing nodes accounting for 15.94s, 94.88% of 16.80s total
+Dropped 104 nodes (cum <= 0.08s)
+Showing top 20 nodes out of 64
       flat  flat%   sum%        cum   cum%
-     4.15s 23.22% 23.22%      4.15s 23.22%  runtime.pthread_cond_wait
-     3.64s 20.37% 43.59%      3.64s 20.37%  runtime.kevent
-     2.60s 14.55% 58.14%      2.61s 14.61%  syscall.syscall
-     1.98s 11.08% 69.22%      1.98s 11.08%  runtime.pthread_cond_signal
-     1.28s  7.16% 76.39%      1.28s  7.16%  runtime.usleep
-     0.85s  4.76% 81.14%      4.49s 25.13%  runtime.netpoll
-     0.83s  4.64% 85.79%      0.85s  4.76%  runtime.nanotime
-     0.52s  2.91% 88.70%      0.52s  2.91%  runtime.(*waitq).dequeueSudoG
-     0.45s  2.52% 91.21%      0.54s  3.02%  tgracchus/numbers.fanIn.func1.1
-     0.40s  2.24% 93.45%      0.40s  2.24%  indexbytebody
-     0.18s  1.01% 94.46%      0.18s  1.01%  runtime.pthread_cond_timedwait_relative_np
-     0.11s  0.62% 95.08%      0.29s  1.62%  runtime.notetsleep
-     0.07s  0.39% 95.47%      0.71s  3.97%  runtime.selectgo
-     0.06s  0.34% 95.80%      0.31s  1.73%  tgracchus/numbers.NewNumberStore.func1
-     0.03s  0.17% 95.97%     10.39s 58.14%  runtime.findrunnable
-     0.03s  0.17% 96.14%      1.03s  5.76%  runtime.runqgrab
-     0.03s  0.17% 96.31%     11.13s 62.28%  runtime.schedule
-     0.02s  0.11% 96.42%      1.11s  6.21%  runtime.ready
-     0.02s  0.11% 96.53%      1.05s  5.88%  runtime.runqsteal
-     0.01s 0.056% 96.59%      3.03s 16.96%  bufio.(*Reader).ReadBytes
-(pprof)
+     4.15s 24.70% 24.70%      4.15s 24.70%  runtime.pthread_cond_wait
+     3.26s 19.40% 44.11%      3.26s 19.40%  runtime.kevent
+     2.05s 12.20% 56.31%      2.05s 12.20%  syscall.syscall
+     1.70s 10.12% 66.43%      1.70s 10.12%  runtime.pthread_cond_signal
+     1.46s  8.69% 75.12%      1.46s  8.69%  runtime.usleep
+     0.94s  5.60% 80.71%      4.20s 25.00%  runtime.netpoll
+     0.48s  2.86% 83.57%      0.48s  2.86%  runtime.nanotime
+     0.44s  2.62% 86.19%      0.66s  3.93%  tgracchus/numbers.fanIn.func1.1
+     0.39s  2.32% 88.51%      0.39s  2.32%  runtime.(*waitq).dequeueSudoG
+     0.22s  1.31% 89.82%      0.22s  1.31%  runtime.pthread_cond_timedwait_relative_np
+     0.18s  1.07% 90.89%      0.18s  1.07%  indexbytebody
+     0.15s  0.89% 91.79%      0.37s  2.20%  runtime.notetsleep
+     0.11s  0.65% 92.44%      0.12s  0.71%  runtime.walltime
+     0.09s  0.54% 92.98%      0.09s  0.54%  runtime.madvise
+     0.09s  0.54% 93.51%      1.22s  7.26%  runtime.runqgrab
+     0.07s  0.42% 93.93%      0.17s  1.01%  runtime.lock
+     0.06s  0.36% 94.29%      0.10s   0.6%  runtime.evacuate_fast64
+     0.04s  0.24% 94.52%     10.12s 60.24%  runtime.findrunnable
+     0.04s  0.24% 94.76%      0.62s  3.69%  runtime.selectgo
+     0.02s  0.12% 94.88%     10.91s 64.94%  runtime.schedule
 ```
 

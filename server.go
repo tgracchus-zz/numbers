@@ -62,10 +62,7 @@ func NewSingleConnectionListener(controller TCPController, terminate chan int) (
 	}, numbers
 }
 
-type terminateError struct {
-}
-
-func (e *terminateError) Error() string { return "TERMINATED" }
+var TERMINATED = errors.New("TERMINATED")
 
 func listenOnce(ctx context.Context, l net.Listener, controller TCPController, numbers chan int, terminate chan int) error {
 	c, err := l.Accept()
@@ -75,9 +72,8 @@ func listenOnce(ctx context.Context, l net.Listener, controller TCPController, n
 	defer closeConnection(c)
 	err = controller(ctx, c, numbers, terminate)
 	if err != nil {
-		serr, ok := err.(*terminateError)
-		if ok {
-			return serr
+		if err == TERMINATED {
+			return err
 		}
 		log.Printf("%v", errors.Wrap(err, "controller error"))
 		return nil

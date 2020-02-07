@@ -34,7 +34,7 @@ func StartNumberServer(concurrentConnections int, address string) {
 		listeners[i] = cnnListener
 		numbersOuts[i] = numbers
 	}
-	deDuplicatedNumbers := NumberStore(reportPeriod, numbersOuts)
+	deDuplicatedNumbers := NumberStore(reportPeriod, numbersOuts, terminate)
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -89,8 +89,13 @@ func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, ter
 			return errors.Wrap(fmt.Errorf("client: %s, no 9 char length string %s", c.RemoteAddr().String(), data), "check for 9 digits")
 		}
 		if data == "terminate" {
-			close(terminate)
-			return &terminateError{}
+			select {
+			case <-terminate:
+				return TERMINATED
+			default:
+				close(terminate)
+			}
+			return TERMINATED
 		}
 		number, err := strconv.Atoi(data)
 		if err != nil {
@@ -99,7 +104,7 @@ func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, ter
 
 		select {
 		case <-terminate:
-			return &terminateError{}
+			return TERMINATED
 		default:
 			numbers <- number
 		}
@@ -109,9 +114,9 @@ func DefaultTCPController(ctx context.Context, c net.Conn, numbers chan int, ter
 // NumberStore given a list of channels it listens to all of them and deduplicated the numbers received.
 // If the number is not duplicated handles it to the returned channel for further processing.
 // It also keeps track of total and unique numbers and the current 10s windows of unique and duplicated numbers.
-func NumberStore(reportPeriod int, ins []chan int) chan int {
+func NumberStore(reportPeriod int, ins []chan int, terminate chan int) chan int {
 	out := make(chan int)
-	in := fanIn(ins)
+	in := fanIn(ins, terminate)
 	numbers := make(map[int]bool)
 	var total int64 = 0
 	var currentUnique int64 = 0
@@ -146,7 +151,7 @@ func NumberStore(reportPeriod int, ins []chan int) chan int {
 	return out
 }
 
-func fanIn(ins []chan int) chan int {
+func fanIn(ins []chan int, terminate chan int) chan int {
 	var wg sync.WaitGroup
 	wg.Add(len(ins))
 	out := make(chan int)
@@ -162,6 +167,8 @@ func fanIn(ins []chan int) chan int {
 						} else {
 							return
 						}
+					case <-terminate:
+						return
 					}
 				}
 			}(ch)
@@ -194,6 +201,9 @@ func FileWriter(in chan int, filePath string) chan int {
 						log.Printf("%v", errors.Wrap(err, "Fprintf"))
 					}
 				} else {
+					if err := b.Flush(); err != nil {
+						log.Printf("%v", err)
+					}
 					close(done)
 					return
 				}
@@ -209,9 +219,6 @@ func FileWriter(in chan int, filePath string) chan int {
 }
 
 func closeFile(b *bufio.Writer, f *os.File) {
-	if err := b.Flush(); err != nil {
-		log.Printf("%v", err)
-	}
 	if err := f.Close(); err != nil {
 		log.Printf("%v", err)
 	}
