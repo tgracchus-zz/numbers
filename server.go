@@ -10,40 +10,25 @@ import (
 // ConnectionListener given a listener it listen and establish connections.
 type ConnectionListener func(ctx context.Context, l net.Listener)
 
-// TCPController is executed when a ConnectionListener establish a connection,
-// it defines the way to handle a connection.
-type TCPController func(ctx context.Context, c net.Conn) error
+type TCPController func(ctx context.Context, c net.Conn, numbers chan int, terminate chan int) error
 
 // StartServer starts the server with the given connection listener and at the given address.
-func StartServer(ctx context.Context, connectionListener ConnectionListener, address string) {
+func StartServer(ctx context.Context, connectionListener ConnectionListener, address string, stop chan int) error {
 	conf := &net.ListenConfig{KeepAlive: 15}
 	l, err := conf.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Printf("%v", errors.Wrap(err, "StartConnectionListener"))
-		return
+		log.Printf("%v", errors.Wrap(err, "Star listener"))
+		return err
 	}
 	defer closeListener(l)
 	log.Printf("server started at:%s", address)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	//Cancel
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				cancel()
-				log.Printf("%v", "closing listener")
-				closeListener(l)
-				return
-			}
-		}
-	}()
-
-	connectionListener(ctx, l)
+	go connectionListener(ctx, l)
+	<-stop
+	return nil
 }
 
 func closeListener(l net.Listener) {
+	log.Printf("%v", "closing listener")
 	if err := l.Close(); err != nil {
 		log.Printf("%v", errors.Wrap(err, "Closing listener"))
 	}
@@ -51,47 +36,49 @@ func closeListener(l net.Listener) {
 
 // NewMultipleConnectionListener starts has many instances as given in separate goroutines and waits the
 // context to be cancelled.
-func NewMultipleConnectionListener(cnnHandlers [] ConnectionListener) (ConnectionListener, error) {
+func NewMultipleConnectionListener(listeners [] ConnectionListener) ConnectionListener {
 	return func(ctx context.Context, l net.Listener) {
-		for i := 0; i < len(cnnHandlers); i++ {
-			log.Printf("creating connection handler: %d", i)
-			go cnnHandlers[i](ctx, l)
+		for i := 0; i < len(listeners); i++ {
+			go func(index int) {
+				log.Printf("creating connection handler: %d", index)
+				listeners[index](ctx, l)
+			}(i)
 		}
-		<-ctx.Done()
-	}, nil
+	}
 }
 
 // NewSingleConnectionListener creates a new ConnectionListener which listen for a connection
 // and then it calls the given TCPController in a sync way.
-func NewSingleConnectionListener(controller TCPController) ConnectionListener {
+func NewSingleConnectionListener(controller TCPController, terminate chan int) (ConnectionListener, chan int) {
+	numbers := make(chan int)
 	return func(ctx context.Context, l net.Listener) {
+		defer close(numbers)
 		for {
-			if listenOnce(ctx, l, controller) {
+			if err := listenOnce(ctx, l, controller, numbers, terminate); err != nil {
+				log.Printf("%v", err)
 				return
 			}
 		}
-	}
+	}, numbers
 }
 
-func listenOnce(ctx context.Context, l net.Listener, controller TCPController) bool {
-	if checkIfTerminated(ctx) {
-		return true
-	}
+var TERMINATED = errors.New("TERMINATED")
+
+func listenOnce(ctx context.Context, l net.Listener, controller TCPController, numbers chan int, terminate chan int) error {
 	c, err := l.Accept()
 	if err != nil {
-		log.Printf("%v", errors.Wrap(err, "accept connection"))
-		return true
+		return errors.Wrap(err, "accept connection")
 	}
 	defer closeConnection(c)
-
-	if checkIfTerminated(ctx) {
-		return true
-	}
-	err = controller(ctx, c)
+	err = controller(ctx, c, numbers, terminate)
 	if err != nil {
+		if err == TERMINATED {
+			return err
+		}
 		log.Printf("%v", errors.Wrap(err, "controller error"))
+		return nil
 	}
-	return false
+	return nil
 }
 
 func closeConnection(c net.Conn) {
@@ -99,14 +86,5 @@ func closeConnection(c net.Conn) {
 		if err := c.Close(); err != nil {
 			log.Printf("%v", errors.Wrap(err, "closeConnection"))
 		}
-	}
-}
-
-func checkIfTerminated(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
 	}
 }

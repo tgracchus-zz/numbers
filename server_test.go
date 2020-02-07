@@ -1,9 +1,7 @@
 package numbers_test
 
 import (
-	"bufio"
 	"context"
-	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -18,21 +16,11 @@ func TestNewSingleConnectionListener(t *testing.T) {
 	expectedNumber := "098765432"
 
 	sendData(t, client, expectedNumber)
-	cnnListener := numbers.NewSingleConnectionListener(newMockTcpController(t, cancel, expectedNumber+"\n"))
-	cnnListener(ctx, &mockListener{connection: server})
-}
-
-func TestNewSingleConnectionListenerContextCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	server, client := net.Pipe()
-	expectedNumber := "098765432"
-	sendData(t, client, expectedNumber)
-
-	controller := newMockTcpController(t, cancel, "")
-	cnnListener := numbers.NewSingleConnectionListener(controller)
-	cnnListener(ctx, &mockListener{connection: server})
+	terminate := make(chan int)
+	cnnListener, out := numbers.NewSingleConnectionListener(numbers.DefaultTCPController, terminate)
+	go cnnListener(ctx, &mockListener{connection: server})
+	expectNumber(out, 98765432, t)
+	sendData(t, client, "terminate")
 }
 
 func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testing.T) {
@@ -43,23 +31,9 @@ func TestNewSingleConnectionListenerControllerReturnsErrorAndJustLogIt(t *testin
 	expectedNumber := "098765432"
 	sendData(t, client, expectedNumber)
 
-	controller := newMockTcpController(t, cancel, expectedNumber+"\n")
-	cnnListener := numbers.NewSingleConnectionListener(controller)
-	cnnListener(ctx, &mockListener{connection: server})
-}
-
-func TestNewMultipleConnectionListener(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	mockConnectionListener := newMockConnectionListener(t, ctx, cancel)
-	multipleCnnListener, err := numbers.NewMultipleConnectionListener([]numbers.ConnectionListener{mockConnectionListener})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	server, _ := net.Pipe()
-	multipleCnnListener(ctx, &mockListener{connection: server, i: 0})
+	terminate := make(chan int)
+	cnnListener, _ := numbers.NewSingleConnectionListener(numbers.DefaultTCPController, terminate)
+	go cnnListener(ctx, &mockListener{connection: server})
 }
 
 func newMockConnectionListener(t *testing.T, ctx context.Context, cancel context.CancelFunc) numbers.ConnectionListener {
@@ -94,19 +68,4 @@ func (m *mockListener) Close() error {
 
 func (m *mockListener) Addr() net.Addr {
 	return nil
-}
-func newMockTcpController(t *testing.T, cancel context.CancelFunc, expectedData string) numbers.TCPController {
-	return func(ctx context.Context, c net.Conn) error {
-		reader := bufio.NewReader(c)
-		data, err := reader.ReadString('\n')
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if data != expectedData {
-			t.Fatal(fmt.Errorf("expected %s but got %s", expectedData, data))
-		}
-		cancel()
-		return nil
-	}
 }
